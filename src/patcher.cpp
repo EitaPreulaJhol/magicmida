@@ -116,11 +116,11 @@ void Patcher::NormalizeLayout() {
     }
 
     if (header.SizeOfRawData != 0) {
-      // Preserve every raw byte (including debug data living in alignment
-      // padding). When the virtual size is larger, the tail stays zeroed.
+      // Only the raw bytes belong in the file. VirtualSize may be larger
+      // (.bss, or a section stretched over removed protector RVA ranges);
+      // the loader zero-fills the virtual tail, so do not materialize it.
       layout.copySize = header.SizeOfRawData;
-      layout.newSize = std::max<uint32_t>(header.Misc.VirtualSize,
-                                          header.SizeOfRawData);
+      layout.newSize = header.SizeOfRawData;
       pe_->FileAlign(layout.newSize);
       if (layout.newSize == 0) {
         layout.newSize = fileAlignment;
@@ -356,7 +356,9 @@ void Patcher::FlattenLayout() {
                   stream_.Memory() + oldRaw, copySize);
     }
     section.Header.PointerToRawData = section.Header.VirtualAddress;
-    section.Header.SizeOfRawData = section.Header.Misc.VirtualSize;
+    // Keep the original raw size. The flat stream is SizeOfImage, so the
+    // virtual tail is present as zeros for the legacy RVA-based scanners.
+    section.Header.SizeOfRawData = oldSize;
   }
 
   pe_->ntHeaders.OptionalHeader.SizeOfHeaders = firstVA;
