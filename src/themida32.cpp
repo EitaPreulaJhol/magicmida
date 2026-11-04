@@ -1384,6 +1384,7 @@ void ThemidaDebugger::FinishUnpacking(uintptr_t oep) {
   dumper.IAT = iat;
   auto pe = dumper.Process();
   dumper.DumpToFile(fileName, *pe, isDll_);
+  LogF(ltGood, "Dump written to: %s", WideToUtf8(fileName).c_str());
 
   hideThreadEnd_ = true;
   TerminateProcess(process_.hProcess, 0);

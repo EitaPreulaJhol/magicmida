@@ -5,6 +5,7 @@
 #include "pe_report.h"
 #include "reloc_fix.h"
 #include "scyllahide.h"
+#include "stream.h"
 
 #if defined(_WIN64)
 #include "themida64.h"
@@ -52,6 +53,7 @@ enum ControlId : int {
 enum MenuId : int {
   IDM_OPEN = 200,
   IDM_CLEAR_LOG,
+  IDM_SAVE_LOG,
   IDM_EXIT,
   IDM_ABOUT,
 };
@@ -216,6 +218,18 @@ bool TargetIsDll() {
   }
 }
 
+uint16_t TargetMachine() {
+  const std::wstring target = GetText(g_app.target);
+  if (target.empty() || !FileExists(target)) {
+    return 0;
+  }
+  try {
+    return ReadPEMachine(target);
+  } catch (...) {
+    return 0;
+  }
+}
+
 void UpdateCommandUi() {
   const int selection = SelectedCommand();
   const bool unpack = selection == static_cast<int>(Command::Unpack);
@@ -223,8 +237,9 @@ void UpdateCommandUi() {
   const bool dumpCode = selection == static_cast<int>(Command::DumpCode);
   const bool enabled = !g_app.running;
   const bool dllTarget = (unpack || shrink) && TargetIsDll();
+  const bool canCreateData = TargetMachine() == IMAGE_FILE_MACHINE_I386;
 
-  EnableWindow(g_app.dataSections, enabled && unpack);
+  EnableWindow(g_app.dataSections, enabled && unpack && canCreateData);
   EnableWindow(g_app.noScylla, enabled && unpack);
   EnableWindow(g_app.fixRelocs, enabled && dllTarget);
   EnableWindow(g_app.pidLabel, enabled && dumpCode);
@@ -313,6 +328,11 @@ bool ReadJob(Job* job, std::wstring* error) {
   }
   if (job->fixRelocations && !TargetIsDll()) {
     job->fixRelocations = false;
+  }
+  if (job->createDataSections &&
+      TargetMachine() != IMAGE_FILE_MACHINE_I386) {
+    // MkData only exists in the 32-bit build; the 64-bit debugger ignores it.
+    job->createDataSections = false;
   }
 
   return true;
@@ -481,6 +501,9 @@ bool RunWorkerJob(const Job& job) {
   WaitForSingleObject(process.hProcess, INFINITE);
   DWORD exitCode = 1;
   GetExitCodeProcess(process.hProcess, &exitCode);
+  if (exitCode != 0) {
+    LogF(ltWarning, "The 32-bit worker exited with code %lu.", exitCode);
+  }
   CloseHandle(process.hThread);
   CloseHandle(process.hProcess);
   CloseHandle(readPipe);
@@ -827,6 +850,47 @@ void Layout(HWND hwnd) {
   MoveWindow(g_app.log, margin, y, width, logHeight, TRUE);
 }
 
+void SaveLog() {
+  if (g_app.log == nullptr) {
+    return;
+  }
+
+  wchar_t file[MAX_PATH]{};
+  OPENFILENAMEW dialog{};
+  dialog.lStructSize = sizeof(dialog);
+  dialog.hwndOwner = g_app.hwnd;
+  dialog.lpstrFilter = L"Text files (*.txt)\0*.txt\0All files (*.*)\0*.*\0";
+  dialog.lpstrFile = file;
+  dialog.nMaxFile = static_cast<DWORD>(_countof(file));
+  dialog.lpstrDefExt = L"txt";
+  dialog.lpstrTitle = L"Save log";
+  dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+  if (!GetSaveFileNameW(&dialog)) {
+    return;
+  }
+
+  const int length = GetWindowTextLengthW(g_app.log);
+  std::wstring text(static_cast<size_t>(length) + 1, L'\0');
+  if (length > 0) {
+    GetWindowTextW(g_app.log, text.data(), length + 1);
+  }
+  text.resize(static_cast<size_t>(length));
+
+  try {
+    FileStream out(file, FileStream::Mode::Create);
+    constexpr uint8_t bom[] = {0xEF, 0xBB, 0xBF};
+    out.Write(bom, sizeof(bom));
+    const std::string utf8 = WideToUtf8(text);
+    if (!utf8.empty()) {
+      out.Write(utf8.data(), utf8.size());
+    }
+    SetStatus(L"Log saved.");
+  } catch (const std::exception& error) {
+    MessageBoxW(g_app.hwnd, Utf8ToWide(error.what()).c_str(), kWindowTitle,
+                MB_OK | MB_ICONWARNING);
+  }
+}
+
 void ShowAbout() {
   std::wstring text = L"Magicmida\n\nScyllaHide ";
   text += Utf8ToWide(scyllahide::Version());
@@ -869,6 +933,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
           return 0;
         case IDM_CLEAR_LOG:
           SetWindowTextW(g_app.log, L"");
+          return 0;
+        case IDM_SAVE_LOG:
+          SaveLog();
           return 0;
         case IDM_EXIT:
           PostMessageW(hwnd, WM_CLOSE, 0, 0);
@@ -1056,6 +1123,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
   HMENU fileMenu = CreatePopupMenu();
   AppendMenuW(fileMenu, MF_STRING, IDM_OPEN, L"&Open...\tCtrl+O");
   AppendMenuW(fileMenu, MF_STRING, IDM_CLEAR_LOG, L"&Clear log");
+  AppendMenuW(fileMenu, MF_STRING, IDM_SAVE_LOG, L"&Save log...\tCtrl+S");
   AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(fileMenu, MF_STRING, IDM_EXIT, L"E&xit");
   AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"&File");
@@ -1106,11 +1174,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
     arguments = nullptr;
   }
 
-  ACCEL accelerator{};
-  accelerator.fVirt = FVIRTKEY | FCONTROL;
-  accelerator.key = 'O';
-  accelerator.cmd = IDM_OPEN;
-  g_app.accel = CreateAcceleratorTableW(&accelerator, 1);
+  ACCEL accelerator[2]{};
+  accelerator[0].fVirt = FVIRTKEY | FCONTROL;
+  accelerator[0].key = 'O';
+  accelerator[0].cmd = IDM_OPEN;
+  accelerator[1].fVirt = FVIRTKEY | FCONTROL;
+  accelerator[1].key = 'S';
+  accelerator[1].cmd = IDM_SAVE_LOG;
+  g_app.accel = CreateAcceleratorTableW(accelerator, 2);
 
   SetLog(GuiLogSink);
   LogF(ltInfo, "Magicmida GUI ready. ScyllaHide %s embedded.",

@@ -47,9 +47,15 @@ void DebuggerCore::Run() {
     }
   } catch (const std::exception& error) {
     LogF(ltFatal, "Creating the process failed: %s", error.what());
+    if (isDll_) {
+      DeleteFileW(dllExecutable_.c_str());
+    }
+    CloseProcessHandles();
     return;
   }
 
+  bool processExited = false;
+  bool stop = false;
   try {
     DWORD status = DBG_CONTINUE;
     for (;;) {
@@ -57,7 +63,7 @@ void DebuggerCore::Run() {
       if (!WaitForDebugEvent(&debugEvent, INFINITE)) {
         LogF(ltFatal, "OS Error: WaitForDebugEvent failed (error %lu)",
              GetLastError());
-        return;
+        break;
       }
 
       currentThreadId_ = debugEvent.dwThreadId;
@@ -99,7 +105,8 @@ void DebuggerCore::Run() {
             default:
               if (MM_EVENT_FIELD(debugEvent, Exception).dwFirstChance == 0) {
                 LogF(ltFatal, "dwFirstChance = 0");
-                return;
+                stop = true;
+                break;
               }
               LogF(ltInfo, "Code 0x%.8X at 0x%p",
                    MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionCode,
@@ -126,11 +133,8 @@ void DebuggerCore::Run() {
           status = OnExitProcessDebugEvent(debugEvent);
           ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId,
                              status);
-          if (isDll_) {
-            Sleep(1000);
-            DeleteFileW(dllExecutable_.c_str());
-          }
-          return;
+          processExited = true;
+          break;
 
         case LOAD_DLL_DEBUG_EVENT:
           status = OnLoadDllDebugEvent(debugEvent);
@@ -152,15 +156,58 @@ void DebuggerCore::Run() {
           break;
       }
 
+      if (processExited || stop) {
+        break;
+      }
+
       ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, status);
     }
   } catch (const std::exception& error) {
     LogF(ltFatal, "Critical error in debug loop: %s", error.what());
   }
 
+  if (!processExited) {
+    TerminateDebuggee();
+  }
+
   if (isDll_) {
-    Sleep(1000);
+    if (process_.hProcess != nullptr) {
+      WaitForSingleObject(process_.hProcess, 5000);
+    }
     DeleteFileW(dllExecutable_.c_str());
+  }
+
+  CloseProcessHandles();
+}
+
+void DebuggerCore::TerminateDebuggee() {
+  if (process_.hProcess == nullptr) {
+    return;
+  }
+
+  DWORD exitCode = 0;
+  if (GetExitCodeProcess(process_.hProcess, &exitCode) &&
+      exitCode == STILL_ACTIVE) {
+    Log(ltWarning, "Terminating the target process.");
+    TerminateProcess(process_.hProcess, 1);
+  }
+}
+
+void DebuggerCore::CloseProcessHandles() {
+  for (auto& entry : threads_) {
+    if (entry.second != nullptr && entry.second != INVALID_HANDLE_VALUE) {
+      CloseHandle(entry.second);
+    }
+  }
+  threads_.clear();
+
+  if (process_.hThread != nullptr) {
+    CloseHandle(process_.hThread);
+    process_.hThread = nullptr;
+  }
+  if (process_.hProcess != nullptr) {
+    CloseHandle(process_.hProcess);
+    process_.hProcess = nullptr;
   }
 }
 
@@ -218,7 +265,14 @@ DWORD DebuggerCore::OnCreateProcessDebugEvent(DEBUG_EVENT& debugEvent) {
   LogF(ltInfo, "Debug session launched (PID: %lu, TID: %lu)",
        debugEvent.dwProcessId, debugEvent.dwThreadId);
 
-  process_.hProcess = MM_EVENT_FIELD(debugEvent, CreateProcessInfo).hProcess;
+  const HANDLE eventProcess =
+      MM_EVENT_FIELD(debugEvent, CreateProcessInfo).hProcess;
+  if (process_.hProcess != nullptr && process_.hProcess != eventProcess) {
+    // CreateProcessW returned a handle to the same process; the debug event
+    // handle replaces it for the rest of the session.
+    CloseHandle(process_.hProcess);
+  }
+  process_.hProcess = eventProcess;
   process_.dwProcessId = debugEvent.dwProcessId;
 
   ProcessBasicInformation pbi{};
@@ -471,6 +525,12 @@ bool DebuggerCore::PEExecute() {
                      nullptr, currentDir.empty() ? nullptr : currentDir.c_str(),
                      &startupInfo, &processInfo);
   process_ = processInfo;
+  // The debug event supplies its own handle for the initial thread, so the
+  // one returned by CreateProcessW is not needed.
+  if (process_.hThread != nullptr) {
+    CloseHandle(process_.hThread);
+    process_.hThread = nullptr;
+  }
   return created != FALSE;
 }
 

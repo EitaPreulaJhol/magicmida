@@ -166,10 +166,15 @@ uint32_t PEHeader::TrimHugeSections(uint8_t* buf, uint32_t& iatRawAddr) {
 
   for (uint32_t i = 0; i < ntHeaders.FileHeader.NumberOfSections; ++i) {
     const uint32_t sectionStart = sections_[i].Header.PointerToRawData;
+    // Do not trust the header blindly: the raw range must lie inside the
+    // dumped image.
+    const uint32_t available =
+        sectionStart < dumpSize_ ? dumpSize_ - sectionStart : 0;
+    const uint32_t scanSize = std::min<uint32_t>(
+        static_cast<uint32_t>(sections_[i].Header.SizeOfRawData), available);
     int zeroStart = -1;
 
-    for (int j = static_cast<int>(sections_[i].Header.SizeOfRawData / 4) - 1;
-         j >= 0; --j) {
+    for (int j = static_cast<int>(scanSize / 4) - 1; j >= 0; --j) {
       if (*reinterpret_cast<uint32_t*>(buf + sectionStart +
                                        static_cast<uint32_t>(j) * 4) == 0) {
         zeroStart = j * 4;
@@ -186,6 +191,9 @@ uint32_t PEHeader::TrimHugeSections(uint8_t* buf, uint32_t& iatRawAddr) {
             1u * 1024 * 1024) {
       uint32_t oldSectionSize = sections_[i].Header.SizeOfRawData;
       SectionAlign(oldSectionSize);  // Sanitize() aligned the actual size.
+      if (static_cast<uint64_t>(sectionStart) + oldSectionSize > dumpSize_) {
+        continue;  // Malformed section; leave it untouched.
+      }
 
       uint32_t newSectionSize = static_cast<uint32_t>(zeroStart);
       FileAlign(newSectionSize);
@@ -198,9 +206,13 @@ uint32_t PEHeader::TrimHugeSections(uint8_t* buf, uint32_t& iatRawAddr) {
       sections_[i].Header.SizeOfRawData = newSectionSize;
 
       if (i < sections_.size() - 1) {
-        std::memmove(buf + sectionStart + newSectionSize,
-                     buf + sections_[i + 1].Header.PointerToRawData,
-                     dumpSize_ - sectionStart - oldSectionSize);
+        const uint32_t nextRaw = sections_[i + 1].Header.PointerToRawData;
+        const uint32_t moveSize =
+            nextRaw < dumpSize_ ? dumpSize_ - nextRaw : 0;
+        if (nextRaw >= sectionStart + newSectionSize) {
+          std::memmove(buf + sectionStart + newSectionSize, buf + nextRaw,
+                       moveSize);
+        }
         for (size_t j = i + 1; j < sections_.size(); ++j) {
           sections_[j].Header.PointerToRawData -= delta;
         }

@@ -116,6 +116,11 @@ class DebuggerCore {
 
   bool WriteByte(uintptr_t address, uint8_t value);
 
+  // Releases the process/thread handles owned by the debug loop and makes
+  // sure the target does not stay alive when unpacking fails.
+  void TerminateDebuggee();
+  void CloseProcessHandles();
+
   DWORD attachPid_ = 0;
   std::wstring dllExecutable_;
   Breakpoint hw_[4];

@@ -84,7 +84,10 @@ void Patcher::ShrinkPE() {
   for (int i = 0; i <= lastIndex; ++i) {
     const IMAGE_SECTION_HEADER& header = pe_->Sections()[static_cast<size_t>(i)].Header;
     const std::string name = SectionName(header);
-    if (!isReferenced(header) && name != ".data" && name != ".rdata" && i > 0) {
+    // .xdata holds the unwind/exception data referenced by .pdata; it is not
+    // covered by a data directory, so keep it explicitly.
+    if (!isReferenced(header) && name != ".data" && name != ".rdata" &&
+        name != ".xdata" && i > 0) {
       deleted.push_back(i);
       if (i != lastIndex) {
         stream_.Seek(
@@ -94,17 +97,21 @@ void Patcher::ShrinkPE() {
             Stream::Origin::Current);
       }
     } else {
+      // The last section extends to the end of the file. SizeOfImage is not
+      // reliable here: its alignment can be larger than the remaining raw
+      // data (and the relocation fix appends a section whose virtual size is
+      // smaller than the aligned raw size).
+      int64_t count = stream_.Size() - stream_.Position();
       if (i != lastIndex) {
-        newStream.CopyFrom(
-            stream_,
-            static_cast<int64_t>(
-                pe_->Sections()[static_cast<size_t>(i + 1)]
-                    .Header.PointerToRawData) -
-                header.PointerToRawData);
-      } else {
-        newStream.CopyFrom(stream_, static_cast<int64_t>(pe_->SizeOfImage()) -
-                                        header.PointerToRawData);
+        const int64_t distance = static_cast<int64_t>(
+            pe_->Sections()[static_cast<size_t>(i + 1)]
+                .Header.PointerToRawData) -
+            static_cast<int64_t>(header.PointerToRawData);
+        if (distance < count) {
+          count = distance;
+        }
       }
+      newStream.CopyFrom(stream_, count);
     }
   }
 

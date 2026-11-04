@@ -51,6 +51,9 @@ struct ParsedPE {
   uint32_t checksum = 0;
   uint16_t dllCharacteristics = 0;
   bool isDll = false;
+  bool relocsStripped = false;
+  uint32_t relocRva = 0;
+  uint32_t relocSize = 0;
   std::vector<ParsedSection> sections;
 };
 
@@ -84,6 +87,8 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
   result.numberOfSections = fileHeader->NumberOfSections;
   result.timestamp = fileHeader->TimeDateStamp;
   result.isDll = (fileHeader->Characteristics & IMAGE_FILE_DLL) != 0;
+  result.relocsStripped =
+      (fileHeader->Characteristics & IMAGE_FILE_RELOCS_STRIPPED) != 0;
 
   const size_t optionalOffset =
       ntOffset + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER);
@@ -106,6 +111,13 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
     result.sizeOfImage = optional->SizeOfImage;
     result.checksum = optional->CheckSum;
     result.dllCharacteristics = optional->DllCharacteristics;
+    if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_BASERELOC) {
+      result.relocRva =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
+              .VirtualAddress;
+      result.relocSize =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+    }
   } else if (result.optionalMagic == 0x20B) {
     if (optionalOffset + sizeof(IMAGE_OPTIONAL_HEADER64) > toRead) {
       throw std::runtime_error("Truncated PE32+ optional header.");
@@ -119,6 +131,13 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
     result.sizeOfImage = optional->SizeOfImage;
     result.checksum = optional->CheckSum;
     result.dllCharacteristics = optional->DllCharacteristics;
+    if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_BASERELOC) {
+      result.relocRva =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
+              .VirtualAddress;
+      result.relocSize =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+    }
   } else {
     throw std::runtime_error("Unknown optional header magic.");
   }
@@ -177,6 +196,10 @@ void EmitPEInfo(const std::wstring& target,
   emit(Format("Checksum:         0x%X", info.checksum));
   emit(Format("DLL flags:        0x%04X%s", info.dllCharacteristics,
               (info.dllCharacteristics & 0x40) ? " (ASLR)" : ""));
+  emit(Format("Relocations:      %s (RVA 0x%X, size 0x%X)%s",
+              (info.relocRva != 0 && info.relocSize != 0) ? "yes" : "no",
+              info.relocRva, info.relocSize,
+              info.relocsStripped ? " [stripped flag set]" : ""));
   emit(Format("Sections:         %u", info.numberOfSections));
   emit("");
   emit(Format("  %-8s %-10s %-10s %-10s %-10s %s", "Name", "VA", "VSize",
