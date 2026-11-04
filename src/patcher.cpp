@@ -6,7 +6,10 @@
 #include <psapi.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <utility>
+#include <vector>
 
 namespace magicmida {
 namespace {
@@ -45,12 +48,324 @@ void Patcher::ProcessShrink() {
   stream_.SaveToFile(fileName_);
 }
 
+// Converts the flat dump layout (file offset == RVA, raw size == virtual
+// size) into the layout a normal linker emits: a compact header area followed
+// by file-aligned section data. RVAs and the in-memory image are unchanged.
+void Patcher::NormalizeLayout() {
+  ReportStatus("Normalizing the PE layout");
+
+  const auto& sections = pe_->Sections();
+  if (sections.empty()) {
+    throw std::runtime_error("NormalizeLayout: the PE has no sections");
+  }
+
+  const uint32_t fileAlignment = pe_->ntHeaders.OptionalHeader.FileAlignment;
+  if (fileAlignment < 0x200 || fileAlignment > 0x10000 ||
+      (fileAlignment & (fileAlignment - 1)) != 0) {
+    LogF(ltWarning,
+         "Skipping PE layout normalization: invalid FileAlignment %X.",
+         fileAlignment);
+    return;
+  }
+
+  const int64_t oldFileSize64 = stream_.Size();
+  if (oldFileSize64 < 0) {
+    throw std::runtime_error("NormalizeLayout: invalid file size");
+  }
+  const uint64_t oldFileSize = static_cast<uint64_t>(oldFileSize64);
+
+  const uint64_t headerEnd =
+      static_cast<uint64_t>(pe_->LFANew()) + sizeof(IMAGE_NT_HEADERS) +
+      static_cast<uint64_t>(sections.size()) * sizeof(IMAGE_SECTION_HEADER);
+  // PEHeader::SaveToStream zeroes 0x200 bytes after the section table; keep
+  // that area inside SizeOfHeaders so it never overwrites section data.
+  uint64_t newHeaders64 = headerEnd + 0x200;
+  if (newHeaders64 > 0xFFFFFFFFull) {
+    throw std::runtime_error("NormalizeLayout: header is too large");
+  }
+  uint32_t newHeaders = static_cast<uint32_t>(newHeaders64);
+  pe_->FileAlign(newHeaders);
+
+  struct SectionLayout {
+    uint32_t oldRaw = 0;
+    uint32_t oldSize = 0;
+    uint32_t newRaw = 0;
+    uint32_t newSize = 0;
+    uint32_t copySize = 0;
+  };
+  std::vector<SectionLayout> layouts;
+  layouts.reserve(sections.size());
+
+  uint64_t oldSectionEnd = 0;
+  uint64_t cursor = newHeaders;
+
+  for (PESection& section : pe_->Sections()) {
+    const IMAGE_SECTION_HEADER header = section.Header;
+    SectionLayout layout;
+    layout.oldRaw = header.PointerToRawData;
+    layout.oldSize = header.SizeOfRawData;
+
+    if (header.SizeOfRawData != 0) {
+      const uint64_t end = static_cast<uint64_t>(header.PointerToRawData) +
+                           header.SizeOfRawData;
+      if (end > oldFileSize) {
+        throw std::runtime_error(
+            "NormalizeLayout: section raw data extends past the file");
+      }
+      oldSectionEnd = std::max(oldSectionEnd, end);
+    }
+
+    if (header.SizeOfRawData != 0) {
+      // Preserve every raw byte (including debug data living in alignment
+      // padding). When the virtual size is larger, the tail stays zeroed.
+      layout.copySize = header.SizeOfRawData;
+      layout.newSize = std::max<uint32_t>(header.Misc.VirtualSize,
+                                          header.SizeOfRawData);
+      pe_->FileAlign(layout.newSize);
+      if (layout.newSize == 0) {
+        layout.newSize = fileAlignment;
+      }
+    }
+
+    if (layout.newSize != 0) {
+      if (cursor > 0xFFFFFFFFull) {
+        throw std::runtime_error("NormalizeLayout: section offset overflow");
+      }
+      layout.newRaw = static_cast<uint32_t>(cursor);
+      if (layout.copySize > 0) {
+        const uint64_t sourceEnd =
+            static_cast<uint64_t>(layout.oldRaw) + layout.copySize;
+        if (sourceEnd > oldFileSize) {
+          throw std::runtime_error(
+              "NormalizeLayout: section data is truncated");
+        }
+      }
+      cursor += layout.newSize;
+    }
+
+    layouts.push_back(layout);
+    section.Header.PointerToRawData = layout.newRaw;
+    section.Header.SizeOfRawData = layout.newSize;
+  }
+
+  const auto mapFileOffset = [&layouts](uint32_t oldOffset) -> uint32_t {
+    if (oldOffset == 0) {
+      return 0;
+    }
+    for (const SectionLayout& layout : layouts) {
+      if (layout.oldSize != 0 && oldOffset >= layout.oldRaw &&
+          oldOffset < layout.oldRaw + layout.oldSize) {
+        return layout.newRaw + (oldOffset - layout.oldRaw);
+      }
+    }
+    return 0;
+  };
+
+  // File-offset fields in the headers/section table still point at the old
+  // layout. Map them into the new one; data outside sections is dropped.
+  pe_->ntHeaders.FileHeader.PointerToSymbolTable =
+      mapFileOffset(pe_->ntHeaders.FileHeader.PointerToSymbolTable);
+  for (PESection& section : pe_->Sections()) {
+    if (section.Header.PointerToRelocations != 0) {
+      section.Header.PointerToRelocations =
+          mapFileOffset(section.Header.PointerToRelocations);
+    }
+    if (section.Header.PointerToLinenumbers != 0) {
+      section.Header.PointerToLinenumbers =
+          mapFileOffset(section.Header.PointerToLinenumbers);
+    }
+  }
+
+  if (cursor > 0xFFFFFFFFull) {
+    throw std::runtime_error("NormalizeLayout: file is too large");
+  }
+
+  // The certificate table is the only trailing data with a well-defined file
+  // offset. Preserve it and move its directory entry; the flat dump padding
+  // (and protector bytes left behind by Shrink) is dropped.
+  const IMAGE_DATA_DIRECTORY oldSecurity =
+      pe_->ntHeaders.OptionalHeader
+          .DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY];
+  uint64_t overlaySize = 0;
+  uint64_t oldOverlayStart = 0;
+  if (oldSecurity.VirtualAddress != 0 && oldSecurity.Size != 0) {
+    const uint64_t start = oldSecurity.VirtualAddress;
+    const uint64_t end = start + oldSecurity.Size;
+    if (start >= oldSectionEnd && end <= oldFileSize && end > start) {
+      oldOverlayStart = start;
+      overlaySize = end - start;
+    } else {
+      Log(ltWarning,
+          "Dropping an invalid certificate table while normalizing the PE.");
+    }
+  }
+
+  if (oldFileSize > oldSectionEnd && overlaySize == 0) {
+    LogF(ltInfo, "Dropping %llu trailing bytes of non-certificate data.",
+         static_cast<unsigned long long>(oldFileSize - oldSectionEnd));
+  }
+
+  const uint64_t newOverlayStart = cursor;
+  uint64_t newFileSize = cursor + overlaySize;
+  if (newFileSize > 0xFFFFFFFFull) {
+    throw std::runtime_error("NormalizeLayout: file is too large");
+  }
+
+  IMAGE_DATA_DIRECTORY& security =
+      pe_->ntHeaders.OptionalHeader
+          .DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY];
+  if (overlaySize != 0) {
+    security.VirtualAddress = static_cast<uint32_t>(newOverlayStart);
+    // security.Size stays unchanged.
+  } else if (security.VirtualAddress != 0 || security.Size != 0) {
+    security.VirtualAddress = 0;
+    security.Size = 0;
+  }
+
+  pe_->ntHeaders.OptionalHeader.SizeOfHeaders = newHeaders;
+  // The file changed, so the old header checksum is meaningless.
+  pe_->ntHeaders.OptionalHeader.CheckSum = 0;
+
+  MemoryStream normalized;
+  normalized.SetSize(static_cast<int64_t>(newFileSize));
+  const uint32_t dosStubSize = pe_->LFANew();
+  if (dosStubSize > oldFileSize) {
+    throw std::runtime_error("NormalizeLayout: truncated DOS header");
+  }
+  if (dosStubSize != 0) {
+    std::memcpy(normalized.Memory(), stream_.Memory(), dosStubSize);
+  }
+  pe_->SaveToStream(normalized);
+
+  for (const SectionLayout& layout : layouts) {
+    if (layout.copySize == 0) {
+      continue;
+    }
+    std::memcpy(normalized.Memory() + layout.newRaw,
+                stream_.Memory() + layout.oldRaw, layout.copySize);
+  }
+
+  // IMAGE_DEBUG_DIRECTORY entries hold file offsets (hint: the CodeView
+  // record), so they must follow the section data they describe.
+  const IMAGE_DATA_DIRECTORY debugDirectory =
+      pe_->ntHeaders.OptionalHeader
+          .DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+  if (debugDirectory.VirtualAddress != 0 &&
+      debugDirectory.Size >= sizeof(IMAGE_DEBUG_DIRECTORY)) {
+    const PESection* debugSection =
+        pe_->GetSectionByVA(debugDirectory.VirtualAddress);
+    if (debugSection != nullptr) {
+      const uint64_t sectionStart = debugSection->Header.VirtualAddress;
+      const uint64_t sectionEnd =
+          sectionStart + std::max<uint32_t>(
+                             debugSection->Header.Misc.VirtualSize,
+                             debugSection->Header.SizeOfRawData);
+      const size_t debugIndex = static_cast<size_t>(
+          debugSection - pe_->Sections().data());
+      const uint64_t newDebugOffset = layouts[debugIndex].newRaw +
+                                      (debugDirectory.VirtualAddress -
+                                       sectionStart);
+      if (debugDirectory.VirtualAddress >= sectionStart &&
+          static_cast<uint64_t>(debugDirectory.VirtualAddress) < sectionEnd &&
+          layouts[debugIndex].newSize != 0 &&
+          newDebugOffset + debugDirectory.Size <= newFileSize) {
+        for (uint32_t offset = 0;
+             offset + sizeof(IMAGE_DEBUG_DIRECTORY) <= debugDirectory.Size;
+             offset += sizeof(IMAGE_DEBUG_DIRECTORY)) {
+          auto* entry = reinterpret_cast<IMAGE_DEBUG_DIRECTORY*>(
+              normalized.Memory() + newDebugOffset + offset);
+          if (entry->PointerToRawData != 0) {
+            entry->PointerToRawData =
+                mapFileOffset(entry->PointerToRawData);
+          }
+        }
+      }
+    }
+  }
+
+  if (overlaySize != 0) {
+    std::memcpy(normalized.Memory() + newOverlayStart,
+                stream_.Memory() + oldOverlayStart,
+                static_cast<size_t>(overlaySize));
+  }
+
+  normalized.SaveToFile(fileName_);
+  stream_ = std::move(normalized);
+
+  LogF(ltInfo,
+       "Normalized PE layout: SizeOfHeaders %X, file size %llX -> %llX.",
+       newHeaders, static_cast<unsigned long long>(oldFileSize),
+       static_cast<unsigned long long>(newFileSize));
+}
+
+void Patcher::FlattenLayout() {
+  const auto& sections = pe_->Sections();
+  if (sections.empty()) {
+    return;
+  }
+
+  bool flat = true;
+  for (const PESection& section : sections) {
+    if (section.Header.SizeOfRawData != 0 &&
+        section.Header.PointerToRawData != section.Header.VirtualAddress) {
+      flat = false;
+      break;
+    }
+  }
+  if (flat) {
+    return;
+  }
+
+  const uint64_t oldFileSize = static_cast<uint64_t>(stream_.Size());
+  uint64_t fileSize = pe_->SizeOfImage();
+  for (const PESection& section : sections) {
+    fileSize = std::max<uint64_t>(
+        fileSize, static_cast<uint64_t>(section.Header.VirtualAddress) +
+                      std::max<uint32_t>(section.Header.Misc.VirtualSize,
+                                         section.Header.SizeOfRawData));
+  }
+  if (fileSize > 0xFFFFFFFFull) {
+    throw std::runtime_error("FlattenLayout: file is too large");
+  }
+
+  MemoryStream flatStream;
+  flatStream.SetSize(static_cast<int64_t>(fileSize));
+  const uint32_t firstVA = sections[0].Header.VirtualAddress;
+  const uint64_t headerCopy = std::min<uint64_t>(oldFileSize, firstVA);
+  if (headerCopy != 0) {
+    std::memcpy(flatStream.Memory(), stream_.Memory(),
+                static_cast<size_t>(headerCopy));
+  }
+
+  for (PESection& section : pe_->Sections()) {
+    const uint32_t oldRaw = section.Header.PointerToRawData;
+    const uint32_t oldSize = section.Header.SizeOfRawData;
+    const uint32_t copySize =
+        std::min<uint32_t>(section.Header.Misc.VirtualSize, oldSize);
+    if (copySize != 0) {
+      if (static_cast<uint64_t>(oldRaw) + copySize > oldFileSize) {
+        throw std::runtime_error("FlattenLayout: section data is truncated");
+      }
+      std::memcpy(flatStream.Memory() + section.Header.VirtualAddress,
+                  stream_.Memory() + oldRaw, copySize);
+    }
+    section.Header.PointerToRawData = section.Header.VirtualAddress;
+    section.Header.SizeOfRawData = section.Header.Misc.VirtualSize;
+  }
+
+  pe_->ntHeaders.OptionalHeader.SizeOfHeaders = firstVA;
+  pe_->SaveToStream(flatStream);
+  stream_ = std::move(flatStream);
+  Log(ltInfo, "Flattened PE layout for data-section creation.");
+}
+
 bool Patcher::ProcessMkData() {
   ReportStatus("Creating data sections");
 #if defined(_WIN64)
   Log(ltInfo, "Data section creation is not available for 64-bit binaries.");
   return false;
 #else
+  FlattenLayout();
   const std::string lower = AsciiLowerCase(WideToUtf8(fileName_));
   const size_t posMs = lower.rfind("maplestory");
   bool created = false;
@@ -1037,6 +1352,11 @@ void Patcher::DumpProcessCode(HANDLE process) {
   LogF(ltGood, "Dumped %llX bytes.",
        static_cast<unsigned long long>(buffer.size()));
 #endif
+}
+
+void NormalizePEFile(const std::wstring& fileName) {
+  Patcher patcher(fileName);
+  patcher.NormalizeLayout();
 }
 
 }  // namespace magicmida

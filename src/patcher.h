@@ -22,12 +22,20 @@ class Patcher {
   void ProcessShrink();
   bool ProcessMkData();
 
+  // Rewrites the raw file layout (SizeOfHeaders, PointerToRawData,
+  // SizeOfRawData) to the conventional aligned layout used by linkers. Must
+  // run after all RVA-based edits (imports, data sections, shrink, relocs).
+  void NormalizeLayout();
+
   void DumpProcessCode(HANDLE process);
 
  private:
   void RelocateExceptionTable();
   void ShrinkPE();
   void ShrinkExportSect();
+  // Expands a normalized layout back to file-offset == RVA for the legacy
+  // data-section finders.
+  void FlattenLayout();
 
   // Proper section characteristics are important for MSVC applications
   // because they check them during C runtime initialization (especially
@@ -42,5 +50,8 @@ class Patcher {
   MemoryStream stream_;
   std::unique_ptr<PEHeader> pe_;
 };
+
+// Convenience wrapper for callers that only have the file path.
+void NormalizePEFile(const std::wstring& fileName);
 
 }  // namespace magicmida

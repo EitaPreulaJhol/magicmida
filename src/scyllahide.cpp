@@ -374,8 +374,10 @@ void OnDllLoad(const std::wstring& fileName) {
   }
 
   const std::string lower = AsciiLowerCase(WideToUtf8(fileName));
-  if (lower.find("user32.dll") == std::string::npos &&
-      lower.find("win32u.dll") == std::string::npos) {
+  // ApplyUserHook resolves the NtUser* detours through user32. win32u.dll is
+  // mapped before user32 and a hook attempt there fails transiently; waiting
+  // for user32 avoids the bogus "applying user32 hooks failed" warning.
+  if (lower.find("user32.dll") == std::string::npos) {
     return;
   }
 

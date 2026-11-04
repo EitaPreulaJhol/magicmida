@@ -648,6 +648,14 @@ bool PrepareOutputFile(const std::wstring& target) {
   return true;
 }
 
+void NormalizeOutputLayout(const std::wstring& fileName) {
+  try {
+    NormalizePEFile(fileName);
+  } catch (const std::exception& error) {
+    LogF(ltWarning, "PE layout normalization failed: %s", error.what());
+  }
+}
+
 bool ExecuteJob(const Job& job) {
   if (g_app.cancelEvent != nullptr) {
     SetCancellationEvent(g_app.cancelEvent);
@@ -674,6 +682,15 @@ bool ExecuteJob(const Job& job) {
 #endif
         debugger.Run();
         success = debugger.Succeeded();
+        if (success) {
+          const std::wstring output = MakeUnpackedFileName(job.target);
+          if (FileExists(output)) {
+            NormalizeOutputLayout(output);
+          } else {
+            LogF(ltWarning, "Normalization skipped: output not found: %s",
+                 WideToUtf8(output).c_str());
+          }
+        }
         break;
       }
       case Command::Shrink: {
@@ -701,12 +718,16 @@ bool ExecuteJob(const Job& job) {
             LogF(ltWarning, "Relocation fix failed: %s", error.what());
           }
         }
+        NormalizeOutputLayout(job.target);
         success = true;
         break;
       }
       case Command::MkData: {
         Patcher patcher(job.target);
         success = patcher.ProcessMkData();
+        if (success) {
+          NormalizeOutputLayout(job.target);
+        }
         break;
       }
       case Command::DumpCode: {

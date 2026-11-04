@@ -419,8 +419,10 @@ bool ApplyKernel32Hook(HOOK_DLL_DATA * hdd, HANDLE hProcess, BYTE * dllMemory, D
 
 bool ApplyUserHook(HOOK_DLL_DATA * hdd, HANDLE hProcess, BYTE * dllMemory, DWORD_PTR imageBase)
 {
-    if (GetModuleBaseRemote(hProcess, L"user32.dll") == nullptr &&
-        GetModuleBaseRemote(hProcess, L"win32u.dll") == nullptr)
+    // The NtUser* detours are set up through user32. win32u can be mapped
+    // first; attempting the hooks there fails transiently and used to produce
+    // a bogus "applying user32 hooks failed" warning. Wait for user32.
+    if (GetModuleBaseRemote(hProcess, L"user32.dll") == nullptr)
     {
         hdd->isUserDllHooked = FALSE;
         return true;
