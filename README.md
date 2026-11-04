@@ -172,6 +172,10 @@ These limitations come from the original Magicmida:
   exception table lives inside a removable protector section (`.themida`,
   `.boot`, `.vmp*`), Shrink copies it to a new `.pdata` section and drops the
   protector's own entries before removing the section.
+* When unpacking a DLL, Magicmida temporarily creates `<name>MM.exe` next to
+  it (the DLL entry-point stub is written into that copy). The copy is removed
+  after the run; a leftover from an interrupted session is deleted before the
+  next DLL unpack.
 * Magicmida does not devirtualize VM bytecode. It detects a virtualized OEP
   (`jmp`/`call`, `push imm32; jmp`, `push imm32; push imm32; jmp`,
   `push imm; ret`, `mov reg, imm; jmp reg`) and, for 32-bit Themida V3,

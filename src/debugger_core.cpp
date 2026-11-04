@@ -49,7 +49,7 @@ void DebuggerCore::Run() {
   } catch (const std::exception& error) {
     LogF(ltFatal, "Creating the process failed: %s", error.what());
     if (isDll_) {
-      DeleteFileW(dllExecutable_.c_str());
+      DeleteDllCopy();
     }
     CloseProcessHandles();
     return;
@@ -190,7 +190,7 @@ void DebuggerCore::Run() {
     if (process_.hProcess != nullptr) {
       WaitForSingleObject(process_.hProcess, 5000);
     }
-    DeleteFileW(dllExecutable_.c_str());
+    DeleteDllCopy();
   }
 
   CloseProcessHandles();
@@ -206,6 +206,35 @@ void DebuggerCore::TerminateDebuggee() {
       exitCode == STILL_ACTIVE) {
     Log(ltWarning, "Terminating the target process.");
     TerminateProcess(process_.hProcess, 1);
+  }
+}
+
+void DebuggerCore::DeleteDllCopy() {
+  if (dllExecutable_.empty()) {
+    return;
+  }
+
+  // The copy may have been marked read-only or be briefly held by the
+  // process/AV after termination; retry before giving up.
+  SetFileAttributesW(dllExecutable_.c_str(), FILE_ATTRIBUTE_NORMAL);
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    if (DeleteFileW(dllExecutable_.c_str())) {
+      LogF(ltInfo, "Removed temporary DLL copy: %s",
+           WideToUtf8(dllExecutable_).c_str());
+      return;
+    }
+    const DWORD error = GetLastError();
+    if (error == ERROR_FILE_NOT_FOUND) {
+      return;
+    }
+    if (attempt == 9) {
+      LogF(ltWarning,
+           "Could not remove temporary DLL copy %s (error %lu); it will be "
+           "deleted on the next DLL unpack.",
+           WideToUtf8(dllExecutable_).c_str(), error);
+      return;
+    }
+    Sleep(100);
   }
 }
 
@@ -616,8 +645,14 @@ void DebuggerCore::MakeDLLExecutable() {
   constexpr size_t kStubSize = sizeof(kStub);
 
   dllExecutable_ = executable_ + L"MM.exe";
+  // Remove a leftover copy from an interrupted previous run before writing
+  // the new one.
+  DeleteDllCopy();
   if (!CopyFileW(executable_.c_str(), dllExecutable_.c_str(), FALSE)) {
-    throw std::runtime_error("Copying DLL failed");
+    const DWORD error = GetLastError();
+    throw std::runtime_error(Format("Copying DLL to %s failed (error %lu)",
+                                    WideToUtf8(dllExecutable_).c_str(),
+                                    error));
   }
 
   FileStream file(dllExecutable_, FileStream::Mode::ReadWrite);

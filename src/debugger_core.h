@@ -120,6 +120,7 @@ class DebuggerCore {
   // sure the target does not stay alive when unpacking fails.
   void TerminateDebuggee();
   void CloseProcessHandles();
+  void DeleteDllCopy();
 
   DWORD attachPid_ = 0;
   std::wstring dllExecutable_;
