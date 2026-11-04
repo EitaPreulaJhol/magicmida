@@ -74,16 +74,46 @@ bool Patcher::ProcessMkData() {
 }
 
 void Patcher::ShrinkPE() {
+  const uint32_t entryPoint =
+      pe_->ntHeaders.OptionalHeader.AddressOfEntryPoint;
+
   const auto isReferenced = [&](const IMAGE_SECTION_HEADER& header) {
-    for (const IMAGE_DATA_DIRECTORY& directory :
-         pe_->ntHeaders.OptionalHeader.DataDirectory) {
-      if (directory.VirtualAddress >= header.VirtualAddress &&
-          directory.VirtualAddress + directory.Size <=
-              header.VirtualAddress + header.Misc.VirtualSize) {
+    const uint64_t sectionStart = header.VirtualAddress;
+    const uint64_t sectionEnd =
+        sectionStart + std::max<uint32_t>(
+                          static_cast<uint32_t>(header.Misc.VirtualSize),
+                          static_cast<uint32_t>(header.SizeOfRawData));
+    for (size_t index = 0; index < IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+         ++index) {
+      // The security directory holds a file offset, not an RVA.
+      if (index == IMAGE_DIRECTORY_ENTRY_SECURITY) {
+        continue;
+      }
+      const IMAGE_DATA_DIRECTORY& directory =
+          pe_->ntHeaders.OptionalHeader.DataDirectory[index];
+      if (directory.VirtualAddress == 0 || directory.Size == 0) {
+        continue;
+      }
+      const uint64_t directoryStart = directory.VirtualAddress;
+      const uint64_t directoryEnd =
+          directoryStart + static_cast<uint64_t>(directory.Size);
+      if (directoryStart < sectionEnd && directoryEnd > sectionStart) {
         return true;
       }
     }
     return false;
+  };
+
+  const auto containsEntryPoint = [&](const IMAGE_SECTION_HEADER& header) {
+    if (entryPoint == 0) {
+      return false;
+    }
+    const uint64_t sectionStart = header.VirtualAddress;
+    const uint64_t sectionEnd =
+        sectionStart + std::max<uint32_t>(
+                          static_cast<uint32_t>(header.Misc.VirtualSize),
+                          static_cast<uint32_t>(header.SizeOfRawData));
+    return entryPoint >= sectionStart && entryPoint < sectionEnd;
   };
 
   std::vector<int> deleted;
@@ -91,38 +121,65 @@ void Patcher::ShrinkPE() {
   newStream.CopyFrom(stream_, pe_->Sections()[0].Header.PointerToRawData);
 
   const int lastIndex = static_cast<int>(pe_->Sections().size()) - 1;
+
+  // Sections without raw data (.bss in regular PEs) must not be used as a
+  // file-layout boundary; their raw pointer is usually zero.
+  const auto nextRawStart = [&](int index) -> int64_t {
+    for (int j = index + 1; j <= lastIndex; ++j) {
+      const IMAGE_SECTION_HEADER& next =
+          pe_->Sections()[static_cast<size_t>(j)].Header;
+      if (next.SizeOfRawData != 0) {
+        return static_cast<int64_t>(next.PointerToRawData);
+      }
+    }
+    return stream_.Size();
+  };
+
   for (int i = 0; i <= lastIndex; ++i) {
     const IMAGE_SECTION_HEADER& header = pe_->Sections()[static_cast<size_t>(i)].Header;
     const std::string name = SectionName(header);
-    // .xdata holds the unwind/exception data referenced by .pdata; .CRT and
-    // .tls hold the CRT initializers and TLS callbacks. None of them are
-    // covered by a data directory, so keep them explicitly.
-    if (!isReferenced(header) && name != ".data" && name != ".rdata" &&
-        name != ".xdata" && name != ".CRT" && name != ".tls" && i > 0) {
+
+    // Keep anything referenced by a data directory, the entry point, and the
+    // runtime data that is not covered by a data directory (.CRT, .tls, .bss,
+    // .xdata/.pdata, CFG tables). Only protector leftovers should be removed.
+    const bool protectedByName =
+        name == ".data" || name == ".rdata" || name == ".xdata" ||
+        name == ".CRT" || name == ".tls" || name == ".bss" ||
+        name == ".gfids" || name == ".00cfg" || name == ".gehcont" ||
+        // MapleCreateDataSections names the guard table .vmp for old MSVC.
+        name == ".vmp";
+    // Custom-named uninitialized-data sections still hold runtime state.
+    const bool protectedByFlags =
+        (header.Characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA) != 0;
+    const bool noRawData = header.SizeOfRawData == 0;
+    const bool keep = i == 0 || isReferenced(header) ||
+                      containsEntryPoint(header) || protectedByName ||
+                      protectedByFlags || noRawData;
+
+    if (!keep) {
+      LogF(ltInfo, "Removing section [%s] (VA %X, size %X)", name.c_str(),
+           header.VirtualAddress, header.Misc.VirtualSize);
       deleted.push_back(i);
-      if (i != lastIndex) {
-        stream_.Seek(
-            static_cast<int64_t>(pe_->Sections()[static_cast<size_t>(i + 1)]
-                                     .Header.PointerToRawData) -
-                header.PointerToRawData,
-            Stream::Origin::Current);
-      }
     } else {
-      // The last section extends to the end of the file. SizeOfImage is not
-      // reliable here: its alignment can be larger than the remaining raw
-      // data (and the relocation fix appends a section whose virtual size is
-      // smaller than the aligned raw size).
-      int64_t count = stream_.Size() - stream_.Position();
-      if (i != lastIndex) {
-        const int64_t distance = static_cast<int64_t>(
-            pe_->Sections()[static_cast<size_t>(i + 1)]
-                .Header.PointerToRawData) -
-            static_cast<int64_t>(header.PointerToRawData);
-        if (distance < count) {
-          count = distance;
-        }
+      if (containsEntryPoint(header) && !isReferenced(header) &&
+          !protectedByName && i != 0) {
+        LogF(ltInfo, "Keeping section [%s]: it contains the entry point.",
+             name.c_str());
       }
-      newStream.CopyFrom(stream_, count);
+      if (noRawData) {
+        continue;
+      }
+
+      const int64_t start = static_cast<int64_t>(header.PointerToRawData);
+      int64_t end = nextRawStart(i);
+      if (end > stream_.Size()) {
+        end = stream_.Size();
+      }
+      if (start < 0 || start >= stream_.Size() || end <= start) {
+        continue;
+      }
+      stream_.Seek(start, Stream::Origin::Begin);
+      newStream.CopyFrom(stream_, end - start);
     }
   }
 
@@ -147,9 +204,30 @@ void Patcher::ShrinkExportSect() {
     return;
   }
 
+  // Only compact a dedicated .edata section whose first byte is the export
+  // directory. If the directory lives in .rdata (common for MinGW or merged
+  // layouts), moving it would overwrite unrelated data.
+  const std::string exportSectionName = SectionName(exportSection->Header);
+  if (exportSectionName != ".edata" ||
+      directory->VirtualAddress != exportSection->Header.VirtualAddress) {
+    Log(ltWarning,
+        "Skipping export section compaction: the export directory is not at "
+        "the start of a dedicated .edata section.");
+    return;
+  }
+
   if (exportSection->Header.SizeOfRawData < 0x1000 ||
       directory->Size > exportSection->Header.SizeOfRawData) {
-    Log(ltFatal, "Export section is too small, aborting shrink.");
+    Log(ltWarning, "Skipping export section compaction: section is too small.");
+    return;
+  }
+
+  // The compaction below truncates the section to 0x1000 bytes, so it can
+  // only be used when the whole export data fits in that window.
+  if (directory->Size > 0x1000) {
+    Log(ltWarning,
+        "Skipping export section compaction: export data is larger than "
+        "0x1000 bytes.");
     return;
   }
 

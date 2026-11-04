@@ -20,7 +20,7 @@ file, started hidden, and deleted when the job finishes.
 | Function | Description |
 | --- | --- |
 | Unpack | Unpacks a Themida/WinLicense-protected executable or DLL. The dump is written next to the input with a `U` suffix, so `app.exe` becomes `appU.exe`. |
-| Shrink | Drops sections that are no longer needed after manual unvirtualization. |
+| Shrink | Drops sections that are no longer needed after manual unvirtualization. Keeps the entry-point section, referenced sections and runtime data (`.bss`, `.CRT`, `.tls`, `.xdata`, CFG tables), and writes a `.bak` copy before modifying the file. |
 | MkData | Restores `.rdata` and `.data`. Needed for MSVC 2015+ targets that use Thread Local Storage, and supported for MapleStory binaries. 32-bit targets only. |
 | Dump code | Overwrites `.text` in an already unpacked file with code from a running process. Useful after Oreans Unvirtualizer in OllyDbg. 32-bit targets only. |
 | Info | Shows PE headers, architecture and sections. Runs automatically when a target is selected; also available as `--info` in the CLI. |
@@ -162,6 +162,11 @@ mandatory, exactly as in the original tool.
 ## Things to know about unpacked binaries
 
 These limitations come from the original Magicmida:
+
+* Shrink is destructive. A `.bak` copy is written next to the target before
+  it is modified. If the shrunk file no longer starts, restore the backup and
+  make sure the target was fully unvirtualized before shrinking; removing
+  sections that are still used by the protector will break the image.
 
 * VM anti-dumps are not fixed in general. If the entry point or other code is
   virtualized, the dump can be broken, or it may run only on the machine that

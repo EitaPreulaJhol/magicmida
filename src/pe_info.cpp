@@ -107,11 +107,25 @@ void PEHeader::DeleteSection(int index) {
     size = ntHeaders.OptionalHeader.SizeOfImage -
            sections_[index].Header.SizeOfRawData;
   } else {
-    size = sections_[index + 1].Header.PointerToRawData -
-           sections_[index].Header.PointerToRawData;
+    // Use the next section with raw data as the file-layout boundary;
+    // zero-raw sections (.bss in regular PEs) usually have PointerToRawData 0.
+    uint32_t nextRaw = 0;
+    for (int i = index + 1; i < static_cast<int>(sections_.size()); ++i) {
+      if (sections_[i].Header.SizeOfRawData != 0) {
+        nextRaw = sections_[i].Header.PointerToRawData;
+        break;
+      }
+    }
+    const uint32_t currentRaw = sections_[index].Header.PointerToRawData;
+    size = nextRaw > currentRaw
+               ? nextRaw - currentRaw
+               : sections_[index].Header.SizeOfRawData;
   }
 
   for (int i = static_cast<int>(sections_.size()) - 1; i >= index + 1; --i) {
+    if (sections_[i].Header.SizeOfRawData == 0) {
+      continue;  // Keep the conventional zero raw pointer.
+    }
     sections_[i].Header.PointerToRawData -= size;
   }
 

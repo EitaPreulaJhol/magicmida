@@ -677,6 +677,21 @@ bool ExecuteJob(const Job& job) {
         break;
       }
       case Command::Shrink: {
+        const std::wstring backup = job.target + L".bak";
+        if (!CopyFileW(job.target.c_str(), backup.c_str(), TRUE)) {
+          const DWORD error = GetLastError();
+          if (error == ERROR_FILE_EXISTS) {
+            LogF(ltInfo, "Shrink backup already exists: %s",
+                 WideToUtf8(backup).c_str());
+          } else {
+            LogF(ltWarning, "Could not create shrink backup: %s (error %lu)",
+                 WideToUtf8(backup).c_str(), error);
+          }
+        } else {
+          LogF(ltInfo, "Shrink backup written to: %s",
+               WideToUtf8(backup).c_str());
+        }
+
         Patcher patcher(job.target);
         patcher.ProcessShrink();
         if (job.fixRelocations) {
