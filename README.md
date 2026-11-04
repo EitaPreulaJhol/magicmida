@@ -20,7 +20,7 @@ file, started hidden, and deleted when the job finishes.
 | Function | Description |
 | --- | --- |
 | Unpack | Unpacks a Themida/WinLicense-protected executable or DLL. The dump is written next to the input with a `U` suffix, so `app.exe` becomes `appU.exe`. |
-| Shrink | Drops sections that are no longer needed after manual unvirtualization. Keeps the entry-point section, referenced sections and runtime data (`.bss`, `.CRT`, `.tls`, `.xdata`, CFG tables), removes only unreferenced executable/discardable sections, and writes a `.bak` copy before modifying the file. |
+| Shrink | Drops sections that are no longer needed after manual unvirtualization. Keeps the entry-point section, referenced sections and runtime data (`.bss`, `.CRT`, `.tls`, `.xdata`, CFG tables), removes only unreferenced executable/discardable sections, keeps the VM section when the entry point jumps into it, and writes a `.bak` copy before modifying the file. |
 | MkData | Restores `.rdata` and `.data`. Needed for MSVC 2015+ targets that use Thread Local Storage, and supported for MapleStory binaries. 32-bit targets only. |
 | Dump code | Overwrites `.text` in an already unpacked file with code from a running process. Useful after Oreans Unvirtualizer in OllyDbg. 32-bit targets only. |
 | Info | Shows PE headers, architecture and sections. Runs automatically when a target is selected; also available as `--info` in the CLI. |
@@ -166,7 +166,14 @@ These limitations come from the original Magicmida:
 * Shrink is destructive. A `.bak` copy is written next to the target before
   it is modified. If the shrunk file no longer starts, restore the backup and
   make sure the target was fully unvirtualized before shrinking; removing
-  sections that are still used by the protector will break the image.
+  sections that are still used by the protector will break the image. When
+  the entry point jumps into the protector section (virtualized OEP), Shrink
+  keeps that section and warns instead of breaking startup.
+* Magicmida does not devirtualize VM bytecode. It detects a virtualized OEP
+  (`jmp`/`call`/`push imm; ret`/`mov reg, imm; jmp reg` into the protector
+  section) and, for 32-bit Themida V3, installs a PE-header anti-dump stub.
+  Use a devirtualizer (e.g. Oreans Unvirtualizer) for the VM code itself,
+  then run Shrink again if the VM sections are no longer needed.
 
 * VM anti-dumps are not fixed in general. If the entry point or other code is
   virtualized, the dump can be broken, or it may run only on the machine that

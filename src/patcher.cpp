@@ -116,6 +116,71 @@ void Patcher::ShrinkPE() {
     return entryPoint >= sectionStart && entryPoint < sectionEnd;
   };
 
+  // A virtualized OEP is usually a direct jump/call into the protector
+  // section. Keep the target section as well: removing it would break the
+  // startup path until the target is actually devirtualized.
+  uint32_t entryJumpTarget = 0;
+  if (entryPoint != 0) {
+    const int64_t imageBase =
+        static_cast<int64_t>(pe_->ntHeaders.OptionalHeader.ImageBase);
+    PESection* entrySection = pe_->GetSectionByVA(entryPoint);
+    if (entrySection != nullptr) {
+      const uint32_t delta = entryPoint - entrySection->Header.VirtualAddress;
+      if (delta < entrySection->Header.SizeOfRawData) {
+        const int64_t offset = static_cast<int64_t>(
+            entrySection->Header.PointerToRawData) + delta;
+        if (offset >= 0 && offset < stream_.Size()) {
+          uint8_t code[16]{};
+          const size_t available = std::min<size_t>(
+              sizeof(code), static_cast<size_t>(stream_.Size() - offset));
+          std::memcpy(code, stream_.Memory() + offset, available);
+
+          int64_t target = 0;
+          if (available >= 5 && (code[0] == 0xE9 || code[0] == 0xE8)) {
+            int32_t displacement = 0;
+            std::memcpy(&displacement, code + 1, sizeof(displacement));
+            target = static_cast<int64_t>(entryPoint) + 5 + displacement;
+          } else if (available >= 2 && code[0] == 0xEB) {
+            target = static_cast<int64_t>(entryPoint) + 2 +
+                     static_cast<int8_t>(code[1]);
+          } else if (available >= 6 && code[0] == 0x68 && code[5] == 0xC3) {
+            uint32_t immediate = 0;
+            std::memcpy(&immediate, code + 1, sizeof(immediate));
+            target = static_cast<int64_t>(immediate) - imageBase;
+          } else if (available >= 7 && code[0] == 0xB8 && code[5] == 0xFF &&
+                     code[6] == 0xE0) {
+            uint32_t immediate = 0;
+            std::memcpy(&immediate, code + 1, sizeof(immediate));
+            target = static_cast<int64_t>(immediate) - imageBase;
+          } else if (available >= 12 && code[0] == 0x48 && code[1] == 0xB8 &&
+                     code[10] == 0xFF && code[11] == 0xE0) {
+            uint64_t immediate = 0;
+            std::memcpy(&immediate, code + 2, sizeof(immediate));
+            target = static_cast<int64_t>(immediate) - imageBase;
+          }
+
+          if (target > 0 &&
+              target < static_cast<int64_t>(pe_->SizeOfImage())) {
+            entryJumpTarget = static_cast<uint32_t>(target);
+          }
+        }
+      }
+    }
+  }
+
+  const auto containsEntryJumpTarget =
+      [&](const IMAGE_SECTION_HEADER& header) {
+        if (entryJumpTarget == 0) {
+          return false;
+        }
+        const uint64_t sectionStart = header.VirtualAddress;
+        const uint64_t sectionEnd =
+            sectionStart + std::max<uint32_t>(
+                              static_cast<uint32_t>(header.Misc.VirtualSize),
+                              static_cast<uint32_t>(header.SizeOfRawData));
+        return entryJumpTarget >= sectionStart && entryJumpTarget < sectionEnd;
+      };
+
   std::vector<int> deleted;
   bool removedExecutable = false;
   MemoryStream newStream;
@@ -160,9 +225,10 @@ void Patcher::ShrinkPE() {
     const bool discardable =
         (header.Characteristics & IMAGE_SCN_MEM_DISCARDABLE) != 0;
     const bool removable = executable || discardable;
+    const bool entryJumpTargetSection = containsEntryJumpTarget(header);
     const bool keep = !removable || i == 0 || isReferenced(header) ||
-                      containsEntryPoint(header) || protectedByName ||
-                      protectedByFlags || noRawData;
+                      containsEntryPoint(header) || entryJumpTargetSection ||
+                      protectedByName || protectedByFlags || noRawData;
 
     if (!keep) {
       LogF(executable ? ltWarning : ltInfo,
@@ -177,6 +243,13 @@ void Patcher::ShrinkPE() {
       if (containsEntryPoint(header) && !isReferenced(header) &&
           !protectedByName && i != 0) {
         LogF(ltInfo, "Keeping section [%s]: it contains the entry point.",
+             name.c_str());
+      }
+      if (entryJumpTargetSection && !containsEntryPoint(header) &&
+          !isReferenced(header) && !protectedByName && !noRawData) {
+        LogF(ltWarning,
+             "Keeping section [%s]: the entry point jumps into it "
+             "(virtualized OEP). Devirtualize before shrinking to remove it.",
              name.c_str());
       }
       if (noRawData) {

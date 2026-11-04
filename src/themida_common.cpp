@@ -72,25 +72,61 @@ void ThemidaCommon::InitPEDetails(IMAGE_NT_HEADERS* nt) {
 }
 
 void ThemidaCommon::CheckVirtualizedOEP(uintptr_t oep) {
-#pragma pack(push, 1)
-  struct {
-    uint8_t Instr;
-    uint32_t Displ;
-  } code{};
-#pragma pack(pop)
-
-  if (!RPM(oep, &code, sizeof(code))) {
+  uint8_t code[16]{};
+  if (!RPM(oep, code, sizeof(code)) || tmSectR_.Address == 0) {
     return;
   }
 
-  if (code.Instr != 0xE9 ||
-      oep + 5 + code.Displ < tmSectR_.Address) {
+  uintptr_t target = 0;
+  if (code[0] == 0xE9 || code[0] == 0xE8) {
+    int32_t displacement = 0;
+    std::memcpy(&displacement, code + 1, sizeof(displacement));
+    target = static_cast<uintptr_t>(
+        static_cast<int64_t>(oep) + 5 + displacement);
+  } else if (code[0] == 0xEB) {
+    target = static_cast<uintptr_t>(
+        static_cast<int64_t>(oep) + 2 + static_cast<int8_t>(code[1]));
+  } else if (code[0] == 0x68 && code[5] == 0xC3) {
+    // push imm32; ret
+    uint32_t immediate = 0;
+    std::memcpy(&immediate, code + 1, sizeof(immediate));
+    target = immediate;
+  } else if (code[0] == 0xB8 && code[5] == 0xFF && code[6] == 0xE0) {
+    // mov eax, imm32; jmp eax
+    uint32_t immediate = 0;
+    std::memcpy(&immediate, code + 1, sizeof(immediate));
+    target = immediate;
+  } else if (code[0] == 0x48 && code[1] == 0xB8 && code[10] == 0xFF &&
+             code[11] == 0xE0) {
+    // mov rax, imm64; jmp rax
+    uint64_t immediate = 0;
+    std::memcpy(&immediate, code + 2, sizeof(immediate));
+    target = static_cast<uintptr_t>(immediate);
+  } else {
+    return;
+  }
+
+  if (!peSections_.empty()) {
+    const uintptr_t textStart = imageBase_ + peSections_[0].VirtualAddress;
+    const uintptr_t textEnd = textStart + peSections_[0].Misc.VirtualSize;
+    if (target >= textStart && target < textEnd) {
+      // A jump inside the application's code section is not the VM.
+      return;
+    }
+  }
+
+  if (target < tmSectR_.Address ||
+      (imageBoundary_ != 0 && target >= imageBoundary_)) {
     return;
   }
 
   isVMOEP_ = true;
-  LogF(ltInfo, "OEP is virtualized (!): jmp %08X",
-       static_cast<uint32_t>(oep + 5 + code.Displ));
+  LogF(ltInfo, "OEP is virtualized (!): %llX -> %llX",
+       static_cast<unsigned long long>(oep),
+       static_cast<unsigned long long>(target));
+  Log(ltWarning,
+      "The dump keeps the virtualized entry point. Shrink will keep the VM "
+      "section; devirtualize the target before removing it.");
 }
 
 uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
