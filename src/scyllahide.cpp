@@ -374,17 +374,20 @@ void OnDllLoad(const std::wstring& fileName) {
   }
 
   const std::string lower = AsciiLowerCase(WideToUtf8(fileName));
-  // ApplyUserHook resolves the NtUser* detours through user32. win32u.dll is
-  // mapped before user32 and a hook attempt there fails transiently; waiting
-  // for user32 avoids the bogus "applying user32 hooks failed" warning.
-  if (lower.find("user32.dll") == std::string::npos) {
+  const bool isUser32 = lower.find("user32.dll") != std::string::npos;
+  const bool isWin32u = lower.find("win32u.dll") != std::string::npos;
+  if (!isUser32 && !isWin32u) {
     return;
   }
 
   if (ApplyUserHooks(*g_session)) {
     Log(ltGood, "ScyllaHide: user32 hooks applied");
-  } else {
+  } else if (isUser32) {
     Log(ltWarning, "ScyllaHide: applying user32 hooks failed");
+  } else {
+    // win32u is mapped before user32 and the NtUser* stubs are not always
+    // ready yet. The user32 event retries; only warn if that one fails.
+    Log(ltInfo, "ScyllaHide: user32 hooks will be applied when user32.dll loads");
   }
 }
 

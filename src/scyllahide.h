@@ -57,10 +57,9 @@ const Profile& DefaultProfile();
 bool Start(HANDLE process, DWORD processId, const Profile& profile,
            std::string* error);
 
-// Called for LOAD_DLL_DEBUG_EVENT. Applies the user32 hooks once user32.dll
-// becomes available (it is usually not loaded at the initial break). The
-// earlier win32u.dll load is ignored: hook setup resolves NtUser* through
-// user32 and would fail transiently there.
+// Called for LOAD_DLL_DEBUG_EVENT. Applies the user32 hooks when user32.dll
+// (or win32u.dll) becomes available. The win32u attempt can fail transiently
+// before user32 finishes initializing; only a failure on user32 is warned.
 void OnDllLoad(const std::wstring& fileName);
 
 // Drops the session state.  The target is not unhooked; it normally exits
