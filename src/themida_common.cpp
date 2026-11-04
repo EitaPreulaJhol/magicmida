@@ -94,6 +94,7 @@ void ThemidaCommon::CheckVirtualizedOEP(uintptr_t oep) {
 }
 
 uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
+  ReportStatus("Locating the IAT");
   uintptr_t textBase = 0;
   uintptr_t codeSize = 0;
   uintptr_t dataSize = 0;
@@ -369,6 +370,7 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
 }
 
 void ThemidaCommon::TraceImports(uintptr_t iat, Dumper& dumper) {
+  ReportStatus("Tracing imports");
   std::array<uintptr_t, MAX_IAT_SIZE / sizeof(uintptr_t)> iatData{};
   RPM(iat, iatData.data(), sizeof(iatData));
 

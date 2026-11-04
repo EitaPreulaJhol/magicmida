@@ -41,7 +41,12 @@ Then:
   rebased. For Shrink, the `ImageBase` stored in the header is used as the dump
   base.
 - `PID` is used by Dump code.
-- The log pane shows all output. The menus hold Open, Clear log, and About.
+- `Cancel` stops a running job. For 32-bit targets it also stops the worker;
+  the target is terminated by the debugger cleanup.
+- The log pane shows all output with timestamps. The File menu holds Open,
+  Clear log, Save log (Ctrl+S), Copy log, and Exit.
+- After unpacking, a dump sanity check reports the entry point, section
+  bounds, imports, and relocation directory in the log.
 
 The window has a fixed size and uses classic Windows 2000 controls and fonts.
 It cannot be resized or maximized. Visual styles and the Common Controls v6
@@ -49,6 +54,30 @@ dependency are disabled on purpose.
 
 The executable needs a 64-bit Windows host. The 32-bit worker is an internal
 build artifact and is not distributed as a standalone application.
+
+## Command line
+
+The 64-bit executable can run one job without opening the GUI. Batch
+processing is done by calling it once per target from a shell script.
+
+```text
+magicmida.exe --unpack [--fix-relocs] [--data-sections] [--no-scylla]
+              [--force] <target>
+magicmida.exe --shrink [--fix-relocs] <target>
+magicmida.exe --mkdata <target>
+magicmida.exe --dumpcode --pid <pid> <target>
+magicmida.exe --info <target>
+magicmida.exe --help
+magicmida.exe --version
+```
+
+`--force` is required to overwrite an existing dump. Exit codes are `0` for
+success, `1` for a failed job, and `2` for usage errors. Log lines go to the
+attached console (or a new console when there is no parent console).
+
+Because `magicmida.exe` is a GUI-subsystem executable, `cmd.exe` does not wait
+for it. In batch files use `start /wait magicmida.exe ...` (or
+`Start-Process -Wait` in PowerShell) so the next command sees the exit code.
 
 ## Building
 

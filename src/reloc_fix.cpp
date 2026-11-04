@@ -102,6 +102,7 @@ class RelocTable {
 }  // namespace
 
 bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
+  ReportStatus("Rebuilding relocations");
   MemoryStream stream;
   stream.LoadFromFile(fileName);
   const int64_t fileSize = stream.Size();

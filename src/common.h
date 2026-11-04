@@ -55,6 +55,16 @@ std::string Format(const char* fmt, ...);
 // printf-style logging helper.
 void LogF(LogMsgType type, const char* fmt, ...);
 
+// Optional status sink used to show the current unpacking stage.
+using StatusProc = std::function<void(const std::string&)>;
+void SetStatusReporter(StatusProc proc);
+void ReportStatus(const std::string& text);
+
+// Cancellation event shared by the GUI and the debug loop. The GUI creates
+// and signals it; the debugger polls it.
+void SetCancellationEvent(HANDLE event);
+bool IsCancellationRequested();
+
 // --------------------------------------------------------------------------
 // Strings / paths (Delphi-compatible helpers)
 // --------------------------------------------------------------------------

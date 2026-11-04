@@ -59,9 +59,11 @@ PEHeader::PEHeader(const uint8_t* data, size_t bufferSize) {
     throw std::runtime_error("PEHeader: truncated section table");
   }
 
-  const auto* section = reinterpret_cast<const IMAGE_SECTION_HEADER*>(
-      data + sectionOffset);
+  const auto* section = reinterpret_cast<const IMAGE_SECTION_HEADER*>(data + sectionOffset);
   sections_.resize(ntHeaders.FileHeader.NumberOfSections);
+  if (sections_.empty()) {
+    throw std::runtime_error("PEHeader: PE has no sections");
+  }
   for (size_t i = 0; i < sections_.size(); ++i) {
     sections_[i].Header = section[i];
   }

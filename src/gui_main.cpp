@@ -16,6 +16,7 @@
 #include <windows.h>
 
 #include <commdlg.h>
+#include <richedit.h>
 #include <shellapi.h>
 
 #include <algorithm>
@@ -47,6 +48,7 @@ enum ControlId : int {
   IDC_PID_LABEL,
   IDC_PID,
   IDC_START,
+  IDC_CANCEL,
   IDC_LOG,
   IDC_STATUS,
 };
@@ -55,12 +57,14 @@ enum MenuId : int {
   IDM_OPEN = 200,
   IDM_CLEAR_LOG,
   IDM_SAVE_LOG,
+  IDM_COPY_LOG,
   IDM_EXIT,
   IDM_ABOUT,
 };
 
 constexpr UINT kMsgLog = WM_APP + 1;
 constexpr UINT kMsgDone = WM_APP + 2;
+constexpr UINT kMsgStatus = WM_APP + 3;
 
 struct LogEntry {
   LogMsgType type;
@@ -81,8 +85,11 @@ struct AppState {
   HWND pidLabel = nullptr;
   HWND pid = nullptr;
   HWND start = nullptr;
+  HWND cancel = nullptr;
   HWND log = nullptr;
   HWND status = nullptr;
+  HANDLE cancelEvent = nullptr;
+  std::wstring cancelEventName;
   HFONT uiFont = nullptr;
   HFONT logFont = nullptr;
   HACCEL accel = nullptr;
@@ -172,9 +179,14 @@ void AppendLog(LogMsgType type, const std::string& text) {
     length = 0;
   }
 
+  SYSTEMTIME now{};
+  GetLocalTime(&now);
   const std::string line =
-      text.empty() ? std::string("\r\n")
-                   : std::string(LogPrefix(type)) + text + "\r\n";
+      text.empty()
+          ? std::string("\r\n")
+          : "[" + Format("%02u:%02u:%02u", now.wHour, now.wMinute,
+                         now.wSecond) +
+                "] " + LogPrefix(type) + text + "\r\n";
   const std::wstring wide = Utf8ToWide(line);
 
   SendMessageW(g_app.log, EM_SETREADONLY, FALSE, 0);
@@ -194,6 +206,17 @@ void GuiLogSink(LogMsgType type, const std::string& message) {
   if (!PostMessageW(g_app.hwnd, kMsgLog, 0,
                     reinterpret_cast<LPARAM>(entry))) {
     delete entry;
+  }
+}
+
+void GuiStatusSink(const std::string& text) {
+  if (g_app.hwnd == nullptr) {
+    return;
+  }
+  auto* copy = new std::string(text);
+  if (!PostMessageW(g_app.hwnd, kMsgStatus, 0,
+                    reinterpret_cast<LPARAM>(copy))) {
+    delete copy;
   }
 }
 
@@ -254,6 +277,7 @@ void UpdateCommandUi() {
   EnableWindow(g_app.fixRelocs, enabled && dllTarget);
   EnableWindow(g_app.pidLabel, enabled && dumpCode);
   EnableWindow(g_app.pid, enabled && dumpCode);
+  EnableWindow(g_app.cancel, !enabled && g_app.cancelEvent != nullptr);
 }
 
 void SetRunning(bool running) {
@@ -263,6 +287,7 @@ void SetRunning(bool running) {
   EnableWindow(g_app.browse, !running);
   EnableWindow(g_app.command, !running);
   EnableWindow(g_app.start, !running);
+  EnableWindow(g_app.cancel, running && g_app.cancelEvent != nullptr);
 
   if (!running) {
     UpdateCommandUi();
@@ -457,7 +482,9 @@ bool RunWorkerJob(const Job& job) {
       std::to_wstring(job.pid) + L" " +
       (job.createDataSections ? L"1" : L"0") + L" " +
       (job.useScyllaHide ? L"1" : L"0") + L" " +
-      (job.fixRelocations ? L"1" : L"0") + L" \"" + job.target + L"\"";
+      (job.fixRelocations ? L"1" : L"0") + L" \"" +
+      (g_app.cancelEventName.empty() ? L"-" : g_app.cancelEventName) +
+      L"\" \"" + job.target + L"\"";
 
   PROCESS_INFORMATION process{};
   const BOOL created = CreateProcessW(
@@ -485,6 +512,10 @@ bool RunWorkerJob(const Job& job) {
       std::string line = buffer.substr(0, newline);
       buffer.erase(0, newline + 1);
       if (line.empty()) {
+        continue;
+      }
+      if (line[0] == 'S') {
+        ReportStatus(line.substr(1));
         continue;
       }
       LogMsgType type = ltInfo;
@@ -555,6 +586,10 @@ bool PrepareOutputFile(const std::wstring& target) {
 }
 
 bool ExecuteJob(const Job& job) {
+  if (g_app.cancelEvent != nullptr) {
+    SetCancellationEvent(g_app.cancelEvent);
+  }
+
   if (job.command == Command::Unpack && !PrepareOutputFile(job.target)) {
     return false;
   }
@@ -646,6 +681,41 @@ DWORD WINAPI RunJobThread(LPVOID parameter) {
   return 0;
 }
 
+bool ResolveJob(Job* job, uint16_t* machine, std::wstring* error) {
+  uint16_t detected = 0;
+  try {
+    detected = ReadPEMachine(job->target);
+  } catch (const std::exception& exception) {
+    *error = L"Could not read the target PE header: ";
+    *error += Utf8ToWide(exception.what());
+    return false;
+  }
+  *machine = detected;
+
+#if defined(_WIN64)
+  if (detected == IMAGE_FILE_MACHINE_I386) {
+    // A 32-bit target is unpacked by the embedded 32-bit worker.
+    job->useWorker = true;
+  } else if (detected == IMAGE_FILE_MACHINE_AMD64) {
+    job->useWorker = false;
+    if (job->command == Command::MkData ||
+        job->command == Command::DumpCode) {
+      *error = L"MkData and Dump code are only available for 32-bit targets.";
+      return false;
+    }
+  } else {
+    *error = L"Unsupported target architecture.";
+    return false;
+  }
+#else
+  if (detected != IMAGE_FILE_MACHINE_I386) {
+    *error = L"This 32-bit build can only unpack 32-bit targets.";
+    return false;
+  }
+#endif
+  return true;
+}
+
 void StartJob() {
   if (g_app.running) {
     return;
@@ -660,42 +730,11 @@ void StartJob() {
   }
 
   uint16_t machine = 0;
-  try {
-    machine = ReadPEMachine(job.target);
-  } catch (const std::exception& exception) {
-    error = L"Could not read the target PE header: ";
-    error += Utf8ToWide(exception.what());
+  if (!ResolveJob(&job, &machine, &error)) {
     MessageBoxW(g_app.hwnd, error.c_str(), kWindowTitle,
                 MB_OK | MB_ICONWARNING);
     return;
   }
-
-#if defined(_WIN64)
-  if (machine == IMAGE_FILE_MACHINE_I386) {
-    // A 32-bit target is unpacked by the embedded 32-bit worker.
-    job.useWorker = true;
-  } else if (machine == IMAGE_FILE_MACHINE_AMD64) {
-    job.useWorker = false;
-    if (job.command == Command::MkData || job.command == Command::DumpCode) {
-      error = L"MkData and Dump code are only available for 32-bit targets.";
-      MessageBoxW(g_app.hwnd, error.c_str(), kWindowTitle,
-                  MB_OK | MB_ICONWARNING);
-      return;
-    }
-  } else {
-    error = L"Unsupported target architecture.";
-    MessageBoxW(g_app.hwnd, error.c_str(), kWindowTitle,
-                MB_OK | MB_ICONWARNING);
-    return;
-  }
-#else
-  if (machine != IMAGE_FILE_MACHINE_I386) {
-    error = L"This 32-bit build can only unpack 32-bit targets.";
-    MessageBoxW(g_app.hwnd, error.c_str(), kWindowTitle,
-                MB_OK | MB_ICONWARNING);
-    return;
-  }
-#endif
 
   if (job.command == Command::DumpCode) {
     const std::wstring text = GetText(g_app.pid);
@@ -709,15 +748,62 @@ void StartJob() {
     job.pid = static_cast<DWORD>(value);
   }
 
+  if (job.command == Command::Unpack) {
+    const std::wstring output = MakeUnpackedFileName(job.target);
+    if (FileExists(output)) {
+      const std::wstring text =
+          L"The output file already exists:\n\n" + output +
+          L"\n\nOverwrite it?";
+      if (MessageBoxW(g_app.hwnd, text.c_str(), kWindowTitle,
+                      MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
+        return;
+      }
+    }
+  }
+
+  static unsigned int cancelCounter = 0;
+  if (g_app.cancelEvent != nullptr) {
+    CloseHandle(g_app.cancelEvent);
+    g_app.cancelEvent = nullptr;
+  }
+  g_app.cancelEventName =
+      L"Local\\MagicmidaCancel-" + std::to_wstring(GetCurrentProcessId()) +
+      L"-" + std::to_wstring(GetTickCount64()) + L"-" +
+      std::to_wstring(++cancelCounter);
+  g_app.cancelEvent =
+      CreateEventW(nullptr, TRUE, FALSE, g_app.cancelEventName.c_str());
+  if (g_app.cancelEvent == nullptr) {
+    LogF(ltWarning, "Could not create the cancellation event (error %lu).",
+         GetLastError());
+    g_app.cancelEventName.clear();
+  }
+
+  PEFlags flags;
+  try {
+    flags = ReadPEFlags(job.target);
+  } catch (...) {
+  }
+
+  std::wstring status = L"Running: ";
+  status += (machine == IMAGE_FILE_MACHINE_I386) ? L"i386" : L"amd64";
+  status += flags.isDll ? L" DLL " : L" EXE ";
+  status += CommandName(job.command);
+
   LogF(ltInfo, "Starting %s: %s", WideToUtf8(CommandName(job.command)).c_str(),
        WideToUtf8(job.target).c_str());
   SetRunning(true);
-  SetStatus(L"Running...");
+  SetStatus(status.c_str());
 
   auto* threadJob = new Job(job);
   HANDLE thread = CreateThread(nullptr, 0, RunJobThread, threadJob, 0, nullptr);
   if (thread == nullptr) {
     delete threadJob;
+    if (g_app.cancelEvent != nullptr) {
+      CloseHandle(g_app.cancelEvent);
+      g_app.cancelEvent = nullptr;
+    }
+    g_app.cancelEventName.clear();
+    SetCancellationEvent(nullptr);
     SetRunning(false);
     SetStatus(L"Failed to start.");
     LogF(ltFatal, "Could not start worker thread (error %lu)", GetLastError());
@@ -765,6 +851,8 @@ void CreateControls(HWND hwnd) {
   g_app.start =
       CreateChild(L"BUTTON", L"Start", BS_DEFPUSHBUTTON | WS_TABSTOP, 0,
                   IDC_START);
+  g_app.cancel = CreateChild(L"BUTTON", L"Cancel",
+                             BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_CANCEL);
   g_app.log = CreateChild(
       L"EDIT", L"",
       WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
@@ -810,7 +898,7 @@ void CreateControls(HWND hwnd) {
       g_app.targetLabel, g_app.target,      g_app.browse,
       g_app.commandLabel, g_app.command,    g_app.dataSections,
       g_app.noScylla,     g_app.fixRelocs,   g_app.pidLabel,   g_app.pid,
-      g_app.start,        g_app.status,
+      g_app.start,        g_app.cancel,      g_app.status,
   };
   for (HWND control : normalFontControls) {
     SendMessageW(control, WM_SETFONT,
@@ -846,6 +934,7 @@ void Layout(HWND hwnd) {
   const int pidLabelWidth = Dip(30);
   const int pidEditWidth = Dip(48);
   const int startWidth = Dip(72);
+  const int cancelWidth = Dip(72);
 
   int y = margin;
   MoveWindow(g_app.targetLabel, margin, y + Dip(2), targetLabelWidth,
@@ -873,6 +962,8 @@ void Layout(HWND hwnd) {
   MoveWindow(g_app.pidLabel, x, y + Dip(2), pidLabelWidth, labelHeight, TRUE);
   x += pidLabelWidth + Dip(4);
   MoveWindow(g_app.pid, x, y, pidEditWidth, rowHeight, TRUE);
+  MoveWindow(g_app.cancel, margin + width - startWidth - Dip(6) - cancelWidth,
+             y, cancelWidth, rowHeight, TRUE);
   MoveWindow(g_app.start, margin + width - startWidth, y, startWidth,
              rowHeight, TRUE);
 
@@ -886,6 +977,58 @@ void Layout(HWND hwnd) {
     logHeight = Dip(80);
   }
   MoveWindow(g_app.log, margin, y, width, logHeight, TRUE);
+}
+
+void CopyLog() {
+  if (g_app.log == nullptr) {
+    return;
+  }
+
+  std::wstring text;
+  DWORD start = 0;
+  DWORD end = 0;
+  SendMessageW(g_app.log, EM_GETSEL, reinterpret_cast<WPARAM>(&start),
+               reinterpret_cast<LPARAM>(&end));
+  if (end > start) {
+    text.resize(static_cast<size_t>(end - start) + 1);
+    const LRESULT copied = SendMessageW(
+        g_app.log, EM_GETSELTEXT, 0,
+        reinterpret_cast<LPARAM>(text.data()));
+    text.resize(copied > 0 ? static_cast<size_t>(copied) : 0);
+  } else {
+    const int length = GetWindowTextLengthW(g_app.log);
+    if (length <= 0) {
+      return;
+    }
+    text.resize(static_cast<size_t>(length) + 1);
+    GetWindowTextW(g_app.log, text.data(), length + 1);
+    text.resize(static_cast<size_t>(length));
+  }
+
+  if (text.empty()) {
+    return;
+  }
+
+  if (!OpenClipboard(g_app.hwnd)) {
+    return;
+  }
+  EmptyClipboard();
+  const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+  HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+  if (memory != nullptr) {
+    void* destination = GlobalLock(memory);
+    if (destination != nullptr) {
+      std::memcpy(destination, text.c_str(), bytes);
+      GlobalUnlock(memory);
+      if (SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
+        GlobalFree(memory);
+      }
+    } else {
+      GlobalFree(memory);
+    }
+  }
+  CloseClipboard();
+  SetStatus(L"Log copied.");
 }
 
 void SaveLog() {
@@ -966,6 +1109,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
         case IDC_START:
           StartJob();
           return 0;
+        case IDC_CANCEL:
+          if (g_app.running && g_app.cancelEvent != nullptr) {
+            SetEvent(g_app.cancelEvent);
+            EnableWindow(g_app.cancel, FALSE);
+            SetStatus(L"Cancelling...");
+          }
+          return 0;
         case IDC_COMMAND:
           if (notification == CBN_SELCHANGE) {
             UpdateCommandUi();
@@ -983,6 +1133,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
           return 0;
         case IDM_SAVE_LOG:
           SaveLog();
+          return 0;
+        case IDM_COPY_LOG:
+          CopyLog();
           return 0;
         case IDM_EXIT:
           PostMessageW(hwnd, WM_CLOSE, 0, 0);
@@ -1022,12 +1175,27 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
       return 0;
     }
 
+    case kMsgStatus: {
+      auto* text = reinterpret_cast<std::string*>(lParam);
+      if (text != nullptr) {
+        SetStatus(Utf8ToWide(*text).c_str());
+        delete text;
+      }
+      return 0;
+    }
+
     case kMsgDone: {
       if (g_app.worker != nullptr) {
         WaitForSingleObject(g_app.worker, INFINITE);
         CloseHandle(g_app.worker);
         g_app.worker = nullptr;
       }
+      if (g_app.cancelEvent != nullptr) {
+        CloseHandle(g_app.cancelEvent);
+        g_app.cancelEvent = nullptr;
+      }
+      g_app.cancelEventName.clear();
+      SetCancellationEvent(nullptr);
       SetRunning(false);
       SetStatus(wParam != 0 ? L"Completed successfully."
                             : L"Failed. See the log.");
@@ -1047,6 +1215,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
 
     case WM_DESTROY:
       KillTimer(hwnd, kTargetTimerId);
+      if (g_app.cancelEvent != nullptr) {
+        CloseHandle(g_app.cancelEvent);
+        g_app.cancelEvent = nullptr;
+      }
       if (g_app.worker != nullptr) {
         CloseHandle(g_app.worker);
         g_app.worker = nullptr;
@@ -1110,8 +1282,201 @@ void WorkerLogSink(LogMsgType type, const std::string& message) {
             nullptr);
 }
 
+void WorkerStatusSink(const std::string& text) {
+  std::string line = "S";
+  line += text;
+  line.push_back('\n');
+
+  const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (output == nullptr || output == INVALID_HANDLE_VALUE) {
+    return;
+  }
+  DWORD written = 0;
+  WriteFile(output, line.data(), static_cast<DWORD>(line.size()), &written,
+            nullptr);
+}
+
+void CliWrite(const std::string& text) {
+  const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (output == nullptr || output == INVALID_HANDLE_VALUE) {
+    return;
+  }
+  DWORD written = 0;
+  WriteFile(output, text.data(), static_cast<DWORD>(text.size()), &written,
+            nullptr);
+}
+
+void CliLogSink(LogMsgType type, const std::string& message) {
+  SYSTEMTIME now{};
+  GetLocalTime(&now);
+  CliWrite("[" + Format("%02u:%02u:%02u", now.wHour, now.wMinute,
+                         now.wSecond) +
+           "] " + LogPrefix(type) + message + "\r\n");
+}
+
+void AttachCliConsole() {
+  if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+    AllocConsole();
+  }
+  const HANDLE output = CreateFileW(
+      L"CONOUT$", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+      OPEN_EXISTING, 0, nullptr);
+  if (output != INVALID_HANDLE_VALUE) {
+    SetStdHandle(STD_OUTPUT_HANDLE, output);
+    SetStdHandle(STD_ERROR_HANDLE, output);
+  }
+  SetConsoleOutputCP(CP_UTF8);
+}
+
+void PrintUsage() {
+  CliWrite(
+      "Usage:\n"
+      "  magicmida.exe                          Open the GUI\n"
+      "  magicmida.exe <target>                 Open the GUI with a target\n"
+      "  magicmida.exe --unpack [options] <target>\n"
+      "  magicmida.exe --shrink [--fix-relocs] <target>\n"
+      "  magicmida.exe --mkdata <target>\n"
+      "  magicmida.exe --dumpcode --pid <pid> <target>\n"
+      "  magicmida.exe --info <target>\n"
+      "\n"
+      "Options:\n"
+      "  --fix-relocs      Rebuild DLL relocations (Unpack/Shrink)\n"
+      "  --data-sections   Create .rdata/.data (Unpack, 32-bit targets)\n"
+      "  --no-scylla       Disable the embedded ScyllaHide\n"
+      "  --force           Overwrite an existing dump\n"
+      "  --pid <pid>       Process ID for --dumpcode\n"
+      "  --help, --version\n");
+}
+
+void PrintVersion() {
+  CliWrite("Magicmida (ScyllaHide " + std::string(scyllahide::Version()) +
+           ")\n");
+}
+
+int RunCommandLine(int argumentCount, wchar_t** arguments) {
+  AttachCliConsole();
+
+  Job job;
+  bool commandSet = false;
+  bool force = false;
+
+  for (int i = 1; i < argumentCount; ++i) {
+    const std::wstring argument = arguments[i];
+    if (argument == L"--help" || argument == L"-h") {
+      PrintUsage();
+      return 0;
+    }
+    if (argument == L"--version") {
+      PrintVersion();
+      return 0;
+    }
+    if (argument == L"--unpack") {
+      job.command = Command::Unpack;
+      commandSet = true;
+    } else if (argument == L"--shrink") {
+      job.command = Command::Shrink;
+      commandSet = true;
+    } else if (argument == L"--mkdata") {
+      job.command = Command::MkData;
+      commandSet = true;
+    } else if (argument == L"--dumpcode") {
+      job.command = Command::DumpCode;
+      commandSet = true;
+    } else if (argument == L"--info") {
+      job.command = Command::Info;
+      commandSet = true;
+    } else if (argument == L"--fix-relocs") {
+      job.fixRelocations = true;
+    } else if (argument == L"--data-sections") {
+      job.createDataSections = true;
+    } else if (argument == L"--no-scylla") {
+      job.useScyllaHide = false;
+    } else if (argument == L"--force") {
+      force = true;
+    } else if (argument == L"--pid") {
+      if (i + 1 >= argumentCount) {
+        CliWrite("error: --pid needs a value\n");
+        return 2;
+      }
+      const std::wstring value = arguments[++i];
+      wchar_t* end = nullptr;
+      const unsigned long parsed = wcstoul(value.c_str(), &end, 10);
+      if (parsed == 0 || end == value.c_str() || *end != L'\0') {
+        CliWrite("error: invalid PID\n");
+        return 2;
+      }
+      job.pid = static_cast<DWORD>(parsed);
+    } else if (!argument.empty() && argument[0] == L'-') {
+      CliWrite("error: unknown option " + WideToUtf8(argument) + "\n");
+      PrintUsage();
+      return 2;
+    } else if (job.target.empty()) {
+      job.target = argument;
+    } else {
+      CliWrite("error: only one target is supported per invocation\n");
+      return 2;
+    }
+  }
+
+  if (!commandSet || job.target.empty()) {
+    PrintUsage();
+    return 2;
+  }
+  if (job.command == Command::DumpCode && job.pid == 0) {
+    CliWrite("error: --dumpcode needs --pid\n");
+    return 2;
+  }
+
+  SetLog(CliLogSink);
+  SetStatusReporter(nullptr);
+  SetCancellationEvent(nullptr);
+
+  std::wstring error;
+  uint16_t machine = 0;
+  if (!ResolveJob(&job, &machine, &error)) {
+    Log(ltFatal, WideToUtf8(error));
+    return 1;
+  }
+
+  PEFlags flags;
+  try {
+    flags = ReadPEFlags(job.target);
+  } catch (...) {
+  }
+
+  if (job.fixRelocations && !flags.isDll) {
+    Log(ltWarning, "--fix-relocs is only applied to DLL targets.");
+    job.fixRelocations = false;
+  }
+  if (job.fixRelocations && job.command != Command::Unpack &&
+      job.command != Command::Shrink) {
+    Log(ltWarning, "--fix-relocs only applies to Unpack and Shrink.");
+    job.fixRelocations = false;
+  }
+  if (job.createDataSections && job.command != Command::Unpack) {
+    Log(ltWarning, "--data-sections only applies to Unpack.");
+    job.createDataSections = false;
+  }
+  if (job.createDataSections && machine != IMAGE_FILE_MACHINE_I386) {
+    Log(ltWarning, "--data-sections is only available for 32-bit targets.");
+    job.createDataSections = false;
+  }
+
+  if (job.command == Command::Unpack) {
+    const std::wstring output = MakeUnpackedFileName(job.target);
+    if (FileExists(output) && !force) {
+      LogF(ltFatal,
+           "The output file already exists: %s (use --force to overwrite).",
+           WideToUtf8(output).c_str());
+      return 1;
+    }
+  }
+
+  return ExecuteJob(job) ? 0 : 1;
+}
+
 int RunWorkerMode(int argumentCount, wchar_t** arguments) {
-  if (argumentCount < 8) {
+  if (argumentCount < 9) {
     return 2;
   }
 
@@ -1127,11 +1492,29 @@ int RunWorkerMode(int argumentCount, wchar_t** arguments) {
   job.createDataSections = wcscmp(arguments[4], L"1") == 0;
   job.useScyllaHide = wcscmp(arguments[5], L"0") != 0;
   job.fixRelocations = wcscmp(arguments[6], L"1") == 0;
-  job.target = arguments[7];
+  const std::wstring cancelName = arguments[7];
+  job.target = arguments[8];
   job.useWorker = false;
 
+  HANDLE cancelEvent = nullptr;
+  if (!cancelName.empty() && cancelName != L"-") {
+    cancelEvent = OpenEventW(SYNCHRONIZE, FALSE, cancelName.c_str());
+    if (cancelEvent == nullptr) {
+      LogF(ltWarning, "Could not open the cancellation event (error %lu).",
+           GetLastError());
+    }
+  }
+
+  SetCancellationEvent(cancelEvent);
+  SetStatusReporter(WorkerStatusSink);
   SetLog(WorkerLogSink);
-  return ExecuteJob(job) ? 0 : 1;
+  const bool success = ExecuteJob(job);
+  SetStatusReporter(nullptr);
+  SetCancellationEvent(nullptr);
+  if (cancelEvent != nullptr) {
+    CloseHandle(cancelEvent);
+  }
+  return success ? 0 : 1;
 }
 
 }  // namespace
@@ -1143,6 +1526,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
   if (arguments != nullptr && argumentCount >= 2 &&
       _wcsicmp(arguments[1], L"--worker") == 0) {
     const int result = RunWorkerMode(argumentCount, arguments);
+    LocalFree(arguments);
+    return result;
+  }
+
+  if (arguments != nullptr && argumentCount >= 2 &&
+      arguments[1][0] == L'-') {
+    const int result = RunCommandLine(argumentCount, arguments);
     LocalFree(arguments);
     return result;
   }
@@ -1172,6 +1562,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
   AppendMenuW(fileMenu, MF_STRING, IDM_OPEN, L"&Open...\tCtrl+O");
   AppendMenuW(fileMenu, MF_STRING, IDM_CLEAR_LOG, L"&Clear log");
   AppendMenuW(fileMenu, MF_STRING, IDM_SAVE_LOG, L"&Save log...\tCtrl+S");
+  AppendMenuW(fileMenu, MF_STRING, IDM_COPY_LOG, L"&Copy log");
   AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(fileMenu, MF_STRING, IDM_EXIT, L"E&xit");
   AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"&File");
@@ -1232,6 +1623,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
   g_app.accel = CreateAcceleratorTableW(accelerator, 2);
 
   SetLog(GuiLogSink);
+  SetStatusReporter(GuiStatusSink);
   LogF(ltInfo, "Magicmida GUI ready. ScyllaHide %s embedded.",
        scyllahide::Version());
 

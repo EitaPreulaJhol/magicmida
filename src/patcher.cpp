@@ -35,6 +35,7 @@ Patcher::Patcher(const std::wstring& fileName) : fileName_(fileName) {
 }
 
 void Patcher::ProcessShrink() {
+  ReportStatus("Shrinking sections");
   ShrinkPE();
   ShrinkExportSect();
 
@@ -43,6 +44,7 @@ void Patcher::ProcessShrink() {
 }
 
 bool Patcher::ProcessMkData() {
+  ReportStatus("Creating data sections");
 #if defined(_WIN64)
   Log(ltInfo, "Data section creation is not available for 64-bit binaries.");
   return false;
@@ -637,6 +639,9 @@ void Patcher::DumpProcessCode(HANDLE process) {
       imageBase + pe_->Sections()[0].Header.VirtualAddress;
   const uintptr_t endAddress =
       imageBase + pe_->ntHeaders.OptionalHeader.BaseOfData;
+  if (endAddress <= startAddress) {
+    throw std::runtime_error("Invalid code range in the PE header.");
+  }
 
   std::vector<uint8_t> buffer(static_cast<size_t>(endAddress - startAddress));
   SIZE_T bytesRead = 0;

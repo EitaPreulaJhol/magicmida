@@ -2,6 +2,7 @@
 // 64-bit Themida/WinLicense unpacking logic (ported from Themida64.pas).
 #include "themida64.h"
 
+#include "pe_report.h"
 #include "reloc_fix.h"
 #include "scyllahide.h"
 
@@ -544,7 +545,9 @@ void ThemidaDebugger64::FinishUnpacking(uintptr_t oep) {
   // Process the IAT into an import directory and dump the binary to disk.
   const std::wstring fileName = MakeUnpackedFileName(executable_);
   dumper.IAT = iat;
+  ReportStatus("Rebuilding imports");
   auto pe = dumper.Process();
+  ReportStatus("Writing the dump");
   dumper.DumpToFile(fileName, *pe, isDll_);
   LogF(ltGood, "Dump written to: %s", WideToUtf8(fileName).c_str());
 
@@ -552,6 +555,7 @@ void ThemidaDebugger64::FinishUnpacking(uintptr_t oep) {
   TerminateProcess(process_.hProcess, 0);
 
   if (fixRelocations_) {
+    ReportStatus("Rebuilding relocations");
     if (isDll_) {
       try {
         FixDllRelocations(fileName, imageBase_);
@@ -562,6 +566,9 @@ void ThemidaDebugger64::FinishUnpacking(uintptr_t oep) {
       Log(ltWarning, "The relocation fix is only applied to DLL targets.");
     }
   }
+
+  ReportStatus("Verifying the dump");
+  VerifyDump(fileName, isDll_, fixRelocations_);
 
   MarkSuccess();
   Log(ltGood, "Operation completed successfully.");

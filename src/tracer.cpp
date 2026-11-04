@@ -42,8 +42,21 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
   }
 
   DWORD status = DBG_EXCEPTION_NOT_HANDLED;
-  DEBUG_EVENT debugEvent{};
-  while (WaitForDebugEvent(&debugEvent, INFINITE)) {
+  for (;;) {
+    if (IsCancellationRequested()) {
+      throw std::runtime_error("Cancelled by the user");
+    }
+
+    DEBUG_EVENT debugEvent{};
+    if (!WaitForDebugEvent(&debugEvent, 200)) {
+      const DWORD error = GetLastError();
+      if (error == ERROR_SEM_TIMEOUT) {
+        continue;
+      }
+      throw std::runtime_error(Format(
+          "WaitForDebugEvent failed during tracing (error %lu)", error));
+    }
+
     if (debugEvent.dwThreadId != threadId_) {
       LogF(ltInfo, "Suspending spurious thread %lu", debugEvent.dwThreadId);
       HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME, FALSE,
@@ -84,10 +97,6 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
 
     ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, status);
   }
-
-  throw std::runtime_error(
-      Format("WaitForDebugEvent failed during tracing (error %lu)",
-             GetLastError()));
 }
 
 DWORD Tracer::OnSingleStep(const DEBUG_EVENT& /*debugEvent*/) {

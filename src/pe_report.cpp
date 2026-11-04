@@ -54,6 +54,9 @@ struct ParsedPE {
   bool relocsStripped = false;
   uint32_t relocRva = 0;
   uint32_t relocSize = 0;
+  uint32_t importRva = 0;
+  uint32_t importSize = 0;
+  uint64_t fileSize = 0;
   std::vector<ParsedSection> sections;
 };
 
@@ -62,6 +65,7 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
 
   FileStream file(path, FileStream::Mode::Read);
   std::vector<uint8_t> header(0x1000);
+  result.fileSize = static_cast<uint64_t>(file.Size());
   const size_t toRead = static_cast<size_t>(
       std::min<int64_t>(static_cast<int64_t>(header.size()), file.Size()));
   if (toRead < sizeof(IMAGE_DOS_HEADER)) {
@@ -118,6 +122,13 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
       result.relocSize =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
     }
+    if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_IMPORT) {
+      result.importRva =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
+              .VirtualAddress;
+      result.importSize =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+    }
   } else if (result.optionalMagic == 0x20B) {
     if (optionalOffset + sizeof(IMAGE_OPTIONAL_HEADER64) > toRead) {
       throw std::runtime_error("Truncated PE32+ optional header.");
@@ -137,6 +148,13 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
               .VirtualAddress;
       result.relocSize =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+    }
+    if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_IMPORT) {
+      result.importRva =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
+              .VirtualAddress;
+      result.importSize =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
     }
   } else {
     throw std::runtime_error("Unknown optional header magic.");
@@ -224,6 +242,96 @@ void EmitPEInfo(const std::wstring& target,
                 section.name.c_str(), section.virtualAddress,
                 section.virtualSize, section.rawOffset, section.rawSize,
                 flags.c_str()));
+  }
+}
+
+void VerifyDump(const std::wstring& target, bool isDll,
+                bool relocationsExpected) {
+  ParsedPE info;
+  try {
+    info = ReadPEInfo(target);
+  } catch (const std::exception& error) {
+    LogF(ltFatal, "Dump verification failed: %s", error.what());
+    return;
+  }
+
+  Log(ltInfo, "Verifying the dump...");
+  bool ok = true;
+
+  const ParsedSection* entrySection = nullptr;
+  for (const ParsedSection& section : info.sections) {
+    const uint32_t span = std::max(section.virtualSize, section.rawSize);
+    if (info.entryPoint >= section.virtualAddress &&
+        info.entryPoint < section.virtualAddress + span) {
+      entrySection = &section;
+      break;
+    }
+  }
+  if (info.entryPoint == 0) {
+    Log(ltInfo, "No entry point (AddressOfEntryPoint is zero).");
+  } else if (entrySection == nullptr) {
+    LogF(ltWarning, "Entry point 0x%X is outside every section.",
+         info.entryPoint);
+    ok = false;
+  } else if ((entrySection->characteristics & IMAGE_SCN_MEM_EXECUTE) == 0) {
+    LogF(ltWarning, "Entry point 0x%X is in non-executable section %s.",
+         info.entryPoint, entrySection->name.c_str());
+    ok = false;
+  } else {
+    LogF(ltInfo, "Entry point 0x%X is in %s.", info.entryPoint,
+         entrySection->name.c_str());
+  }
+
+  uint64_t virtualEnd = 0;
+  for (const ParsedSection& section : info.sections) {
+    virtualEnd = std::max<uint64_t>(
+        virtualEnd,
+        static_cast<uint64_t>(section.virtualAddress) + section.virtualSize);
+    if (section.rawSize != 0 &&
+        static_cast<uint64_t>(section.rawOffset) + section.rawSize >
+            info.fileSize) {
+      LogF(ltWarning,
+           "Section %s raw data (0x%X+0x%X) lies outside the file (0x%llX).",
+           section.name.c_str(), section.rawOffset, section.rawSize,
+           static_cast<unsigned long long>(info.fileSize));
+      ok = false;
+    }
+    if ((section.characteristics & IMAGE_SCN_MEM_WRITE) != 0 &&
+        (section.characteristics & IMAGE_SCN_MEM_EXECUTE) != 0) {
+      LogF(ltWarning, "Section %s is both writable and executable.",
+           section.name.c_str());
+    }
+  }
+  if (virtualEnd > info.sizeOfImage) {
+    LogF(ltWarning, "SizeOfImage 0x%X is smaller than the sections end 0x%llX.",
+         info.sizeOfImage, static_cast<unsigned long long>(virtualEnd));
+    ok = false;
+  }
+
+  if (info.importRva != 0 && info.importSize != 0) {
+    LogF(ltInfo, "Import directory present (RVA 0x%X, size 0x%X).",
+         info.importRva, info.importSize);
+  } else {
+    Log(ltWarning, "The dump has no import directory.");
+    ok = false;
+  }
+
+  if (info.relocRva != 0 && info.relocSize != 0) {
+    LogF(ltInfo, "Relocation directory present (RVA 0x%X, size 0x%X).",
+         info.relocRva, info.relocSize);
+  } else if (isDll && relocationsExpected) {
+    Log(ltWarning, "Relocations were requested but the dump has none.");
+    ok = false;
+  } else if (isDll) {
+    Log(ltWarning,
+        "The DLL has no relocation table; it can only load at its ImageBase. "
+        "Enable Fix DLL relocations to rebuild it.");
+  }
+
+  if (ok) {
+    Log(ltGood, "Dump sanity check passed.");
+  } else {
+    Log(ltWarning, "Dump sanity check reported problems.");
   }
 }
 

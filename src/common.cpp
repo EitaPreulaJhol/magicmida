@@ -10,6 +10,8 @@ namespace magicmida {
 namespace {
 
 LogProc g_log;
+StatusProc g_statusReporter;
+HANDLE g_cancelEvent = nullptr;
 
 void DefaultLog(LogMsgType type, const std::string& msg) {
   const char* prefix = "[Info] ";
@@ -52,6 +54,25 @@ bool IsPathDelimiter(wchar_t c) {
 
 void SetLog(LogProc proc) {
   g_log = std::move(proc);
+}
+
+void SetStatusReporter(StatusProc proc) {
+  g_statusReporter = std::move(proc);
+}
+
+void ReportStatus(const std::string& text) {
+  if (g_statusReporter) {
+    g_statusReporter(text);
+  }
+}
+
+void SetCancellationEvent(HANDLE event) {
+  g_cancelEvent = event;
+}
+
+bool IsCancellationRequested() {
+  return g_cancelEvent != nullptr &&
+         WaitForSingleObject(g_cancelEvent, 0) == WAIT_OBJECT_0;
 }
 
 void Log(LogMsgType type, const std::string& msg) {

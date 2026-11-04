@@ -61,9 +61,24 @@ void DebuggerCore::Run() {
     DWORD status = DBG_CONTINUE;
     for (;;) {
       DEBUG_EVENT debugEvent{};
-      if (!WaitForDebugEvent(&debugEvent, INFINITE)) {
+      if (!WaitForDebugEvent(&debugEvent, 200)) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_SEM_TIMEOUT) {
+          if (IsCancellationRequested()) {
+            Log(ltWarning, "Cancellation requested; stopping.");
+            stop = true;
+            break;
+          }
+          continue;
+        }
         LogF(ltFatal, "OS Error: WaitForDebugEvent failed (error %lu)",
-             GetLastError());
+             error);
+        break;
+      }
+
+      if (IsCancellationRequested()) {
+        Log(ltWarning, "Cancellation requested; stopping.");
+        stop = true;
         break;
       }
 

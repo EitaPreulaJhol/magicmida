@@ -24,6 +24,12 @@ struct PEFlags {
 // I/O or malformed PE.
 PEFlags ReadPEFlags(const std::wstring& target);
 
+// Sanity-checks an unpacked dump and logs the findings. `isDll` enables the
+// DLL-specific checks; `relocationsExpected` marks a missing relocation table
+// as fatal (the relocation fix was requested).
+void VerifyDump(const std::wstring& target, bool isDll,
+                bool relocationsExpected);
+
 // Returns true when the target PE has IMAGE_FILE_DLL set. Throws on I/O or
 // malformed PE.
 bool ReadPEIsDll(const std::wstring& target);
