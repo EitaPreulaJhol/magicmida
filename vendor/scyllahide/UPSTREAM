@@ -1,0 +1,8 @@
+ScyllaHide
+==========
+
+Upstream: https://github.com/x64dbg/ScyllaHide
+Pinned commit: baa5c8e (v1.4-5-gbaa5c8e)
+
+The files in this directory are a trimmed, patched copy of ScyllaHide.
+See README.magicmida.md for the local changes.

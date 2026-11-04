@@ -1,0 +1,83 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  mingw:
+    name: MinGW x64 (with embedded 32-bit worker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            g++-mingw-w64-x86-64 \
+            g++-mingw-w64-i686
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Verify distribution
+        run: |
+          test -f build/magicmida.exe
+          test -f build/worker/magicmida_worker.exe
+          test ! -f build/magicmida_gui.exe
+          test ! -f build/scylla_hide.ini
+
+      - name: Verify worker is embedded
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          final = Path('build/magicmida.exe').read_bytes()
+          worker = Path('build/worker/magicmida_worker.exe').read_bytes()
+          needle = worker[:4096]
+          pos = final.find(needle)
+          assert pos >= 0 and final[pos:pos + len(worker)] == worker, \
+              "32-bit worker is not embedded in the 64-bit executable"
+          print("32-bit worker embedded:", len(worker), "bytes")
+          PY
+
+      - name: Verify hook payloads import only ntdll
+        run: |
+          x64=build/x64/scylla/HookLibraryx64.dll
+          x86=build/x86/scylla/HookLibraryx86.dll
+          test -f "$x64"
+          test -f "$x86"
+          x86_64-w64-mingw32-objdump -p "$x64" | grep -q 'DLL Name: ntdll.dll'
+          i686-w64-mingw32-objdump -p "$x86" | grep -q 'DLL Name: ntdll.dll'
+          test "$(x86_64-w64-mingw32-objdump -p "$x64" | grep -c 'DLL Name:')" -eq 1
+          test "$(i686-w64-mingw32-objdump -p "$x86" | grep -c 'DLL Name:')" -eq 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: magicmida-x64
+          path: build/magicmida.exe
+          if-no-files-found: error
+
+  # The MSVC job is a non-blocking compile check.  Building the single-file
+  # distribution with MSVC would also require a 32-bit worker and the
+  # GCC-produced BeaEngine object; the MinGW job above produces the artifact.
+  msvc:
+    name: MSVC x64 (compile check)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build/msvc -A x64
+
+      - name: Build
+        run: cmake --build build/msvc --config Release
+
+      - name: Verify output
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build/magicmida.exe)) {
+            throw "build/magicmida.exe not found"
+          }
