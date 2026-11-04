@@ -145,6 +145,7 @@ set(MAGICMIDA_CORE_SOURCES
     src/pe_info.cpp
     src/pe_report.cpp
     src/reloc_fix.cpp
+    src/vm_entry.cpp
     src/scyllahide.cpp
     src/stream.cpp
     src/themida_common.cpp

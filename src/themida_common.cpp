@@ -2,6 +2,8 @@
 // Shared Themida-unpacking logic (ported from ThemidaCommon.pas).
 #include "themida_common.h"
 
+#include "vm_entry.h"
+
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -72,38 +74,38 @@ void ThemidaCommon::InitPEDetails(IMAGE_NT_HEADERS* nt) {
 }
 
 void ThemidaCommon::CheckVirtualizedOEP(uintptr_t oep) {
-  uint8_t code[16]{};
-  if (!RPM(oep, code, sizeof(code)) || tmSectR_.Address == 0) {
+  if (tmSectR_.Address == 0) {
     return;
   }
 
-  uintptr_t target = 0;
-  if (code[0] == 0xE9 || code[0] == 0xE8) {
-    int32_t displacement = 0;
-    std::memcpy(&displacement, code + 1, sizeof(displacement));
-    target = static_cast<uintptr_t>(
-        static_cast<int64_t>(oep) + 5 + displacement);
-  } else if (code[0] == 0xEB) {
-    target = static_cast<uintptr_t>(
-        static_cast<int64_t>(oep) + 2 + static_cast<int8_t>(code[1]));
-  } else if (code[0] == 0x68 && code[5] == 0xC3) {
-    // push imm32; ret
-    uint32_t immediate = 0;
-    std::memcpy(&immediate, code + 1, sizeof(immediate));
-    target = immediate;
-  } else if (code[0] == 0xB8 && code[5] == 0xFF && code[6] == 0xE0) {
-    // mov eax, imm32; jmp eax
-    uint32_t immediate = 0;
-    std::memcpy(&immediate, code + 1, sizeof(immediate));
-    target = immediate;
-  } else if (code[0] == 0x48 && code[1] == 0xB8 && code[10] == 0xFF &&
-             code[11] == 0xE0) {
-    // mov rax, imm64; jmp rax
-    uint64_t immediate = 0;
-    std::memcpy(&immediate, code + 2, sizeof(immediate));
-    target = static_cast<uintptr_t>(immediate);
-  } else {
+  const auto readStub = [&](uintptr_t address, VmStubInfo* info) -> bool {
+    uint8_t code[16]{};
+    if (!RPM(address, code, sizeof(code))) {
+      return false;
+    }
+    *info = ParseVmStub(code, sizeof(code),
+                        static_cast<uint32_t>(address - imageBase_),
+                        static_cast<uint64_t>(imageBase_));
+    return info->kind != VmStubKind::None;
+  };
+
+  VmStubInfo info;
+  if (!readStub(oep, &info)) {
     return;
+  }
+
+  uintptr_t target = imageBase_ + info.targetRva;
+  if (info.kind == VmStubKind::DirectJump ||
+      info.kind == VmStubKind::DirectCall ||
+      info.kind == VmStubKind::ShortJump) {
+    // The OEP may jump/call to a push;jmp entry stub instead of directly
+    // into the VM. Follow one level when that target is not the VM itself.
+    if (target < tmSectR_.Address) {
+      VmStubInfo next;
+      if (readStub(target, &next)) {
+        target = imageBase_ + next.targetRva;
+      }
+    }
   }
 
   if (!peSections_.empty()) {

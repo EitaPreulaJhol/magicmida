@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Post-processing of unpacked files (ported from Patcher.pas).
 #include "patcher.h"
+#include "vm_entry.h"
 
 #include <psapi.h>
 
@@ -76,6 +77,8 @@ bool Patcher::ProcessMkData() {
 void Patcher::ShrinkPE() {
   const uint32_t entryPoint =
       pe_->ntHeaders.OptionalHeader.AddressOfEntryPoint;
+  const uint64_t imageBase =
+      static_cast<uint64_t>(pe_->ntHeaders.OptionalHeader.ImageBase);
 
   const auto isReferenced = [&](const IMAGE_SECTION_HEADER& header) {
     const uint64_t sectionStart = header.VirtualAddress;
@@ -104,82 +107,138 @@ void Patcher::ShrinkPE() {
     return false;
   };
 
-  const auto containsEntryPoint = [&](const IMAGE_SECTION_HEADER& header) {
-    if (entryPoint == 0) {
-      return false;
-    }
-    const uint64_t sectionStart = header.VirtualAddress;
-    const uint64_t sectionEnd =
-        sectionStart + std::max<uint32_t>(
-                          static_cast<uint32_t>(header.Misc.VirtualSize),
-                          static_cast<uint32_t>(header.SizeOfRawData));
-    return entryPoint >= sectionStart && entryPoint < sectionEnd;
+  const auto sectionEnd = [](const IMAGE_SECTION_HEADER& header) {
+    return static_cast<uint64_t>(header.VirtualAddress) +
+           std::max<uint32_t>(static_cast<uint32_t>(header.Misc.VirtualSize),
+                              static_cast<uint32_t>(header.SizeOfRawData));
   };
 
-  // A virtualized OEP is usually a direct jump/call into the protector
-  // section. Keep the target section as well: removing it would break the
-  // startup path until the target is actually devirtualized.
-  uint32_t entryJumpTarget = 0;
+  const auto containsEntryPoint = [&](const IMAGE_SECTION_HEADER& header) {
+    return entryPoint != 0 && entryPoint >= header.VirtualAddress &&
+           entryPoint < sectionEnd(header);
+  };
+
+  // Maps an RVA inside a section's raw data to the file bytes.
+  const auto rvaBytes = [&](uint32_t rva, uint8_t* out, size_t count) -> size_t {
+    for (const PESection& section : pe_->Sections()) {
+      const IMAGE_SECTION_HEADER& header = section.Header;
+      if (rva < header.VirtualAddress ||
+          rva - header.VirtualAddress >= header.SizeOfRawData) {
+        continue;
+      }
+      const uint32_t delta = rva - header.VirtualAddress;
+      const size_t available = header.SizeOfRawData - delta;
+      const size_t bytes = std::min(count, available);
+      const int64_t offset =
+          static_cast<int64_t>(header.PointerToRawData) + delta;
+      if (offset < 0 ||
+          offset + static_cast<int64_t>(bytes) > stream_.Size()) {
+        return 0;
+      }
+      std::memcpy(out, stream_.Memory() + offset, bytes);
+      return bytes;
+    }
+    return 0;
+  };
+
+  const auto parseAt = [&](uint32_t rva) -> VmStubInfo {
+    uint8_t code[16]{};
+    const size_t bytes = rvaBytes(rva, code, sizeof(code));
+    if (bytes < 2) {
+      return {};
+    }
+    return ParseVmStub(code, bytes, rva, imageBase);
+  };
+
+  std::vector<uint32_t> vmTargets;
+  const auto addTarget = [&](uint32_t rva) {
+    if (rva == 0 || rva >= pe_->SizeOfImage()) {
+      return;
+    }
+    if (std::find(vmTargets.begin(), vmTargets.end(), rva) ==
+        vmTargets.end()) {
+      vmTargets.push_back(rva);
+    }
+  };
+  const auto addStubTargets = [&](const VmStubInfo& info, uint32_t stubRva) {
+    addTarget(stubRva);
+    addTarget(info.targetRva);
+    addTarget(info.contextRva);
+    addTarget(info.contextRva2);
+  };
+
+  // Follow the entry stub: push;jmp / push;push;jmp / jmp/call to a stub.
   if (entryPoint != 0) {
-    const int64_t imageBase =
-        static_cast<int64_t>(pe_->ntHeaders.OptionalHeader.ImageBase);
-    PESection* entrySection = pe_->GetSectionByVA(entryPoint);
-    if (entrySection != nullptr) {
-      const uint32_t delta = entryPoint - entrySection->Header.VirtualAddress;
-      if (delta < entrySection->Header.SizeOfRawData) {
-        const int64_t offset = static_cast<int64_t>(
-            entrySection->Header.PointerToRawData) + delta;
-        if (offset >= 0 && offset < stream_.Size()) {
-          uint8_t code[16]{};
-          const size_t available = std::min<size_t>(
-              sizeof(code), static_cast<size_t>(stream_.Size() - offset));
-          std::memcpy(code, stream_.Memory() + offset, available);
-
-          int64_t target = 0;
-          if (available >= 5 && (code[0] == 0xE9 || code[0] == 0xE8)) {
-            int32_t displacement = 0;
-            std::memcpy(&displacement, code + 1, sizeof(displacement));
-            target = static_cast<int64_t>(entryPoint) + 5 + displacement;
-          } else if (available >= 2 && code[0] == 0xEB) {
-            target = static_cast<int64_t>(entryPoint) + 2 +
-                     static_cast<int8_t>(code[1]);
-          } else if (available >= 6 && code[0] == 0x68 && code[5] == 0xC3) {
-            uint32_t immediate = 0;
-            std::memcpy(&immediate, code + 1, sizeof(immediate));
-            target = static_cast<int64_t>(immediate) - imageBase;
-          } else if (available >= 7 && code[0] == 0xB8 && code[5] == 0xFF &&
-                     code[6] == 0xE0) {
-            uint32_t immediate = 0;
-            std::memcpy(&immediate, code + 1, sizeof(immediate));
-            target = static_cast<int64_t>(immediate) - imageBase;
-          } else if (available >= 12 && code[0] == 0x48 && code[1] == 0xB8 &&
-                     code[10] == 0xFF && code[11] == 0xE0) {
-            uint64_t immediate = 0;
-            std::memcpy(&immediate, code + 2, sizeof(immediate));
-            target = static_cast<int64_t>(immediate) - imageBase;
-          }
-
-          if (target > 0 &&
-              target < static_cast<int64_t>(pe_->SizeOfImage())) {
-            entryJumpTarget = static_cast<uint32_t>(target);
-          }
+    const VmStubInfo entry = parseAt(entryPoint);
+    if (entry.kind != VmStubKind::None) {
+      addStubTargets(entry, entryPoint);
+      if (entry.kind == VmStubKind::DirectJump ||
+          entry.kind == VmStubKind::DirectCall ||
+          entry.kind == VmStubKind::ShortJump) {
+        const VmStubInfo next = parseAt(entry.targetRva);
+        if (next.kind != VmStubKind::None) {
+          addStubTargets(next, entry.targetRva);
         }
       }
     }
   }
 
-  const auto containsEntryJumpTarget =
-      [&](const IMAGE_SECTION_HEADER& header) {
-        if (entryJumpTarget == 0) {
-          return false;
+  // Oreans-style reference scan: look for E8/E9 references in the
+  // application's code section whose target is a VM entry stub. The final
+  // VM target section must survive the shrink.
+  if (!pe_->Sections().empty()) {
+    const IMAGE_SECTION_HEADER& text = pe_->Sections()[0].Header;
+    if (text.SizeOfRawData >= 5 &&
+        static_cast<int64_t>(text.PointerToRawData) +
+                static_cast<int64_t>(text.SizeOfRawData) <=
+            stream_.Size()) {
+      const uint8_t* data =
+          stream_.Memory() + text.PointerToRawData;
+      for (uint32_t offset = 0; offset + 5 <= text.SizeOfRawData; ++offset) {
+        if (data[offset] != 0xE8 && data[offset] != 0xE9) {
+          continue;
         }
-        const uint64_t sectionStart = header.VirtualAddress;
-        const uint64_t sectionEnd =
-            sectionStart + std::max<uint32_t>(
-                              static_cast<uint32_t>(header.Misc.VirtualSize),
-                              static_cast<uint32_t>(header.SizeOfRawData));
-        return entryJumpTarget >= sectionStart && entryJumpTarget < sectionEnd;
-      };
+        int32_t displacement = 0;
+        std::memcpy(&displacement, data + offset + 1,
+                    sizeof(displacement));
+        const int64_t target = static_cast<int64_t>(text.VirtualAddress) +
+                               offset + 5 + displacement;
+        if (target <= 0 ||
+            target >= static_cast<int64_t>(pe_->SizeOfImage())) {
+          continue;
+        }
+        VmStubInfo stub = parseAt(static_cast<uint32_t>(target));
+        uint32_t stubRva = static_cast<uint32_t>(target);
+        if (stub.kind == VmStubKind::DirectJump ||
+            stub.kind == VmStubKind::DirectCall ||
+            stub.kind == VmStubKind::ShortJump) {
+          const VmStubInfo next = parseAt(stub.targetRva);
+          if (next.kind != VmStubKind::None) {
+            stub = next;
+            stubRva = stub.targetRva;
+          }
+        }
+        if (stub.kind == VmStubKind::PushJump ||
+            stub.kind == VmStubKind::PushPushJump ||
+            stub.kind == VmStubKind::PushRet ||
+            stub.kind == VmStubKind::MovEaxJmp ||
+            stub.kind == VmStubKind::MovRaxJmp) {
+          LogF(ltInfo, "VM entry reference at %X -> %X",
+               text.VirtualAddress + offset, stubRva);
+          addStubTargets(stub, stubRva);
+        }
+      }
+    }
+  }
+
+  const auto containsVmTarget = [&](const IMAGE_SECTION_HEADER& header) {
+    for (uint32_t target : vmTargets) {
+      if (target >= header.VirtualAddress && target < sectionEnd(header)) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   std::vector<int> deleted;
   bool removedExecutable = false;
@@ -202,7 +261,8 @@ void Patcher::ShrinkPE() {
   };
 
   for (int i = 0; i <= lastIndex; ++i) {
-    const IMAGE_SECTION_HEADER& header = pe_->Sections()[static_cast<size_t>(i)].Header;
+    const IMAGE_SECTION_HEADER& header =
+        pe_->Sections()[static_cast<size_t>(i)].Header;
     const std::string name = SectionName(header);
 
     // Keep anything referenced by a data directory, the entry point, and the
@@ -225,9 +285,9 @@ void Patcher::ShrinkPE() {
     const bool discardable =
         (header.Characteristics & IMAGE_SCN_MEM_DISCARDABLE) != 0;
     const bool removable = executable || discardable;
-    const bool entryJumpTargetSection = containsEntryJumpTarget(header);
+    const bool vmTargetSection = containsVmTarget(header);
     const bool keep = !removable || i == 0 || isReferenced(header) ||
-                      containsEntryPoint(header) || entryJumpTargetSection ||
+                      containsEntryPoint(header) || vmTargetSection ||
                       protectedByName || protectedByFlags || noRawData;
 
     if (!keep) {
@@ -245,11 +305,11 @@ void Patcher::ShrinkPE() {
         LogF(ltInfo, "Keeping section [%s]: it contains the entry point.",
              name.c_str());
       }
-      if (entryJumpTargetSection && !containsEntryPoint(header) &&
+      if (vmTargetSection && !containsEntryPoint(header) &&
           !isReferenced(header) && !protectedByName && !noRawData) {
         LogF(ltWarning,
-             "Keeping section [%s]: the entry point jumps into it "
-             "(virtualized OEP). Devirtualize before shrinking to remove it.",
+             "Keeping section [%s]: it is a VM entry/reference target. "
+             "Devirtualize before shrinking to remove it.",
              name.c_str());
       }
       if (noRawData) {

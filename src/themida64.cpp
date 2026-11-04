@@ -459,7 +459,8 @@ DWORD ThemidaDebugger64::ProcessGuardedAccess(
 
 uintptr_t ThemidaDebugger64::TryFindCorrectOEP(uintptr_t hitAddress) {
   uintptr_t result = hitAddress;
-  if (majorLinkerVersion_ != 9 && majorLinkerVersion_ != 10 &&
+  if (majorLinkerVersion_ != 8 && majorLinkerVersion_ != 9 &&
+      majorLinkerVersion_ != 10 &&
       majorLinkerVersion_ != 11 && majorLinkerVersion_ != 12 &&
       majorLinkerVersion_ != 14) {
     Log(ltFatal,

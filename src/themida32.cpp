@@ -1228,7 +1228,8 @@ void ThemidaDebugger::RestoreStolenOEPForMSVC9DLL(HANDLE /*hThread*/,
 
 uintptr_t ThemidaDebugger::TryFindCorrectOEP(uintptr_t oep) {
   uintptr_t result = oep;
-  if (majorLinkerVersion_ != 9 && majorLinkerVersion_ != 10 &&
+  if (majorLinkerVersion_ != 8 && majorLinkerVersion_ != 9 &&
+      majorLinkerVersion_ != 10 &&
       majorLinkerVersion_ != 11 && majorLinkerVersion_ != 12 &&
       majorLinkerVersion_ != 14) {
     Log(ltFatal,

@@ -2,6 +2,8 @@
 // VM anti-dump mitigation (ported from AntiDumpFix.pas).
 #include "antidump_fix.h"
 
+#include "vm_entry.h"
+
 #include <cstring>
 #include <vector>
 
@@ -46,9 +48,28 @@ bool AntiDumpFixer::RPM(uintptr_t address, void* buf, size_t bufSize) {
 }
 
 void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
-  uint32_t displacement = 0;
-  if (!RPM(oep + 1, &displacement, sizeof(displacement))) {
+  uint8_t code[16]{};
+  if (!RPM(oep, code, sizeof(code))) {
     Log(ltFatal, "ReadProcessMemory failed");
+    return;
+  }
+
+  const VmStubInfo stub = ParseVmStub(
+      code, sizeof(code), static_cast<uint32_t>(oep - imageBase_),
+      static_cast<uint64_t>(imageBase_));
+
+  size_t prefixSize = 0;
+  if (stub.kind == VmStubKind::PushJump) {
+    prefixSize = 5;
+  } else if (stub.kind == VmStubKind::PushPushJump) {
+    prefixSize = 10;
+  } else if (stub.kind != VmStubKind::DirectJump) {
+    Log(ltWarning,
+        "Anti-dump fix skipped: unsupported OEP stub layout.");
+    return;
+  }
+  if (stub.targetRva == 0) {
+    Log(ltWarning, "Anti-dump fix skipped: VM target is outside the image.");
     return;
   }
 
@@ -98,13 +119,24 @@ void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
   // pop eax (undo initial "push 0" for OldProtect)
   newCode.PopStack = 0x58;
 
-  // jmp vm
+  // jmp vm: the final target comes from the parsed entry stub.
+  const uint32_t vmTarget =
+      static_cast<uint32_t>(imageBase_ + stub.targetRva);
+  const uint32_t jmpAddress =
+      static_cast<uint32_t>(oep + prefixSize + sizeof(NewCode));
   newCode.JmpInstr = 0xE9;
-  newCode.JmpDispl =
-      displacement - (static_cast<uint32_t>(sizeof(NewCode)) - 5);
+  newCode.JmpDispl = vmTarget - jmpAddress;
 
-  if (WriteProcessMemory(process_, reinterpret_cast<void*>(oep), &newCode,
-                         sizeof(newCode), nullptr)) {
+  // For push;jmp stubs the original pushed VM context must be preserved in
+  // front of the mitigation stub.
+  std::vector<uint8_t> stubBytes;
+  stubBytes.insert(stubBytes.end(), code, code + prefixSize);
+  const auto* newCodeBytes = reinterpret_cast<const uint8_t*>(&newCode);
+  stubBytes.insert(stubBytes.end(), newCodeBytes,
+                   newCodeBytes + sizeof(newCode));
+
+  if (WriteProcessMemory(process_, reinterpret_cast<void*>(oep),
+                         stubBytes.data(), stubBytes.size(), nullptr)) {
     Log(ltGood, "Installed VM anti-dump (PE header) mitigation at OEP");
     Log(ltInfo,
         "NOTE: We assume there is enough space at the entrypoint, which may "

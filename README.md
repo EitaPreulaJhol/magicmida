@@ -20,7 +20,7 @@ file, started hidden, and deleted when the job finishes.
 | Function | Description |
 | --- | --- |
 | Unpack | Unpacks a Themida/WinLicense-protected executable or DLL. The dump is written next to the input with a `U` suffix, so `app.exe` becomes `appU.exe`. |
-| Shrink | Drops sections that are no longer needed after manual unvirtualization. Keeps the entry-point section, referenced sections and runtime data (`.bss`, `.CRT`, `.tls`, `.xdata`, CFG tables), removes only unreferenced executable/discardable sections, keeps the VM section when the entry point jumps into it, and writes a `.bak` copy before modifying the file. |
+| Shrink | Drops sections that are no longer needed after manual unvirtualization. Keeps the entry-point section, referenced sections and runtime data (`.bss`, `.CRT`, `.tls`, `.xdata`, CFG tables), removes only unreferenced executable/discardable sections, keeps the VM section when the entry point jumps into it or when `.text` references a VM entry stub, and writes a `.bak` copy before modifying the file. |
 | MkData | Restores `.rdata` and `.data`. Needed for MSVC 2015+ targets that use Thread Local Storage, and supported for MapleStory binaries. 32-bit targets only. |
 | Dump code | Overwrites `.text` in an already unpacked file with code from a running process. Useful after Oreans Unvirtualizer in OllyDbg. 32-bit targets only. |
 | Info | Shows PE headers, architecture and sections. Runs automatically when a target is selected; also available as `--info` in the CLI. |
@@ -170,8 +170,10 @@ These limitations come from the original Magicmida:
   the entry point jumps into the protector section (virtualized OEP), Shrink
   keeps that section and warns instead of breaking startup.
 * Magicmida does not devirtualize VM bytecode. It detects a virtualized OEP
-  (`jmp`/`call`/`push imm; ret`/`mov reg, imm; jmp reg` into the protector
-  section) and, for 32-bit Themida V3, installs a PE-header anti-dump stub.
+  (`jmp`/`call`, `push imm32; jmp`, `push imm32; push imm32; jmp`,
+  `push imm; ret`, `mov reg, imm; jmp reg`) and, for 32-bit Themida V3,
+  installs a PE-header anti-dump stub (also for `push imm32; jmp` entries).
+  Shrink also follows `.text` references to Oreans-style VM entry stubs.
   Use a devirtualizer (e.g. Oreans Unvirtualizer) for the VM code itself,
   then run Shrink again if the VM sections are no longer needed.
 
