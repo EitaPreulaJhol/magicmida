@@ -28,6 +28,21 @@ std::string MachineName(uint16_t machine) {
   }
 }
 
+std::string ArchitectureName(uint16_t machine) {
+  switch (machine) {
+    case IMAGE_FILE_MACHINE_I386:
+      return "x86 (32-bit)";
+    case IMAGE_FILE_MACHINE_AMD64:
+      return "x64 (64-bit)";
+    case IMAGE_FILE_MACHINE_ARM:
+      return "ARM (32-bit)";
+    case IMAGE_FILE_MACHINE_ARM64:
+      return "ARM64 (64-bit)";
+    default:
+      return MachineName(machine);
+  }
+}
+
 struct ParsedSection {
   std::string name;
   uint32_t virtualAddress = 0;
@@ -212,6 +227,8 @@ void EmitPEInfo(const std::wstring& target,
 
   emit(Format("File:             %s", WideToUtf8(target).c_str()));
   emit(Format("Machine:          %s", MachineName(info.machine).c_str()));
+  emit(Format("Architecture:     %s",
+              ArchitectureName(info.machine).c_str()));
   emit(Format("Type:             %s", info.isDll ? "DLL" : "EXE"));
   emit(Format("Linker:           %u.%u", info.linkerMajor, info.linkerMinor));
   emit(Format("Timestamp:        0x%08X", info.timestamp));

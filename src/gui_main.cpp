@@ -236,9 +236,11 @@ struct TargetFlags {
   std::wstring path;
   uint16_t machine = 0;
   bool isDll = false;
+  bool valid = false;
 };
 
 TargetFlags g_targetFlags;
+std::wstring g_loggedTarget;
 
 // Reads the target PE flags once per path. UpdateCommandUi is called for
 // every EN_CHANGE, so without the cache (and the debounce timer) a network
@@ -259,9 +261,34 @@ const TargetFlags& CurrentTargetFlags() {
     const PEFlags flags = ReadPEFlags(target);
     g_targetFlags.machine = flags.machine;
     g_targetFlags.isDll = flags.isDll;
+    g_targetFlags.valid = true;
   } catch (...) {
   }
   return g_targetFlags;
+}
+
+void MaybeLogTargetInfo() {
+  const std::wstring target = GetText(g_app.target);
+  if (target.empty()) {
+    g_loggedTarget.clear();
+    return;
+  }
+  if (target == g_loggedTarget) {
+    return;
+  }
+
+  const TargetFlags& flags = CurrentTargetFlags();
+  if (flags.path != target || !flags.valid) {
+    return;
+  }
+
+  g_loggedTarget = target;
+  LogF(ltGood, "Opened target: %s", WideToUtf8(target).c_str());
+  try {
+    EmitPEInfo(target, [](const std::string& line) { Log(ltInfo, line); });
+  } catch (const std::exception& error) {
+    LogF(ltWarning, "Could not read the target PE info: %s", error.what());
+  }
 }
 
 void UpdateAdvancedMenu() {
@@ -308,6 +335,8 @@ void UpdateCommandUi() {
   EnableWindow(g_app.pidLabel, enabled && dumpCode);
   EnableWindow(g_app.pid, enabled && dumpCode);
   EnableWindow(g_app.cancel, !enabled && g_app.cancelEvent != nullptr);
+
+  MaybeLogTargetInfo();
 }
 
 void SetRunning(bool running) {
@@ -347,7 +376,9 @@ void BrowseForTarget() {
   dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
 
   if (GetOpenFileNameW(&dialog)) {
+    g_loggedTarget.clear();
     SetWindowTextW(g_app.target, file);
+    UpdateCommandUi();
   }
 }
 
@@ -768,6 +799,8 @@ void StartJob() {
     return;
   }
 
+  MaybeLogTargetInfo();
+
   if (job.command == Command::DumpCode) {
     const std::wstring text = GetText(g_app.pid);
     wchar_t* end = nullptr;
@@ -896,7 +929,6 @@ void CreateControls(HWND hwnd) {
   addCommand(Command::Shrink, L"Shrink");
   addCommand(Command::MkData, L"Make data sections");
   addCommand(Command::DumpCode, L"Dump code");
-  addCommand(Command::Info, L"Info");
   SendMessageW(g_app.command, CB_SETCURSEL, 0, 0);
 
   // Windows 2000-style UI font.  MS Sans Serif is the classic Win32 dialog
@@ -1184,7 +1216,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
         std::wstring path(static_cast<size_t>(length) + 1, L'\0');
         DragQueryFileW(drop, 0, path.data(), length + 1);
         path.resize(length);
+        g_loggedTarget.clear();
         SetWindowTextW(g_app.target, path.c_str());
+        UpdateCommandUi();
       }
       DragFinish(drop);
       return 0;
@@ -1648,6 +1682,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
     LocalFree(arguments);
     arguments = nullptr;
   }
+  UpdateCommandUi();
 
   ACCEL accelerator[2]{};
   accelerator[0].fVirt = FVIRTKEY | FCONTROL;

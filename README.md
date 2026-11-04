@@ -23,7 +23,7 @@ file, started hidden, and deleted when the job finishes.
 | Shrink | Drops sections that are no longer needed after manual unvirtualization. |
 | MkData | Restores `.rdata` and `.data`. Needed for MSVC 2015+ targets that use Thread Local Storage, and supported for MapleStory binaries. 32-bit targets only. |
 | Dump code | Overwrites `.text` in an already unpacked file with code from a running process. Useful after Oreans Unvirtualizer in OllyDbg. 32-bit targets only. |
-| Info | Shows PE headers and sections, which helps when checking whether a target is packed. |
+| Info | Shows PE headers, architecture and sections. Runs automatically when a target is selected; also available as `--info` in the CLI. |
 
 MkData and Dump code are rejected for 64-bit targets, matching the original
 64-bit build.
@@ -33,7 +33,9 @@ MkData and Dump code are rejected for 64-bit targets, matching the original
 Start `magicmida.exe`, optionally with the target path as the first argument.
 Then:
 
-- Select a target or drag one onto the window.
+- Select a target or drag one onto the window. The PE info (architecture,
+  type, image base, entry point, relocations, sections) is logged automatically
+  when a valid target is loaded.
 - Pick the function from the drop-down list.
 - The **Advanced** menu holds the unpack options. `Create data sections` and
   `Disable ScyllaHide` apply to Unpack. `Fix DLL relocations` applies to
