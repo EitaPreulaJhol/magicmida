@@ -23,6 +23,7 @@ class ThemidaCommon : public DebuggerCore {
  protected:
   bool createDataSections_ = false;
   bool useScyllaHide_ = true;
+  bool fixRelocations_ = false;
   uintptr_t baseOfData_ = 0;
   uintptr_t imageBoundary_ = 0;
   std::vector<IMAGE_SECTION_HEADER> peSections_;

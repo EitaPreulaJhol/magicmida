@@ -2,6 +2,7 @@
 // 64-bit Themida/WinLicense unpacking logic (ported from Themida64.pas).
 #include "themida64.h"
 
+#include "reloc_fix.h"
 #include "scyllahide.h"
 
 #include <algorithm>
@@ -20,10 +21,12 @@ std::string SectionNameTrimmed(const IMAGE_SECTION_HEADER& header) {
 
 ThemidaDebugger64::ThemidaDebugger64(const std::wstring& executable,
                                      const std::wstring& parameters,
-                                     bool createData, bool useScyllaHide)
+                                     bool createData, bool useScyllaHide,
+                                     bool fixRelocations)
     : ThemidaCommon(executable, parameters) {
   createDataSections_ = createData;  // Currently does nothing.
   useScyllaHide_ = useScyllaHide;
+  fixRelocations_ = fixRelocations;
   themidaV3_ = true;                 // Themida V2 is not supported on x64 atm.
 }
 
@@ -546,6 +549,18 @@ void ThemidaDebugger64::FinishUnpacking(uintptr_t oep) {
 
   hideThreadEnd_ = true;
   TerminateProcess(process_.hProcess, 0);
+
+  if (fixRelocations_) {
+    if (isDll_) {
+      try {
+        FixDllRelocations(fileName, imageBase_);
+      } catch (const std::exception& error) {
+        LogF(ltWarning, "Relocation fix failed: %s", error.what());
+      }
+    } else {
+      Log(ltWarning, "The relocation fix is only applied to DLL targets.");
+    }
+  }
 
   MarkSuccess();
   Log(ltGood, "Operation completed successfully.");

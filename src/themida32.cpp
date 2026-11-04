@@ -4,6 +4,7 @@
 
 #include "antidump_fix.h"
 #include "patcher.h"
+#include "reloc_fix.h"
 #include "scyllahide.h"
 
 #include <algorithm>
@@ -20,10 +21,12 @@ constexpr uint32_t STATUS_PORT_NOT_SET = 0xC0000353;
 
 ThemidaDebugger::ThemidaDebugger(const std::wstring& executable,
                                  const std::wstring& parameters,
-                                 bool createData, bool useScyllaHide)
+                                 bool createData, bool useScyllaHide,
+                                 bool fixRelocations)
     : ThemidaCommon(executable, parameters) {
   createDataSections_ = createData;
   useScyllaHide_ = useScyllaHide;
+  fixRelocations_ = fixRelocations;
 }
 
 // --------------------------------------------------------------------------
@@ -1388,6 +1391,18 @@ void ThemidaDebugger::FinishUnpacking(uintptr_t oep) {
   if (createDataSections_) {
     Patcher patcher(fileName);
     patcher.ProcessMkData();
+  }
+
+  if (fixRelocations_) {
+    if (isDll_) {
+      try {
+        FixDllRelocations(fileName, imageBase_);
+      } catch (const std::exception& error) {
+        LogF(ltWarning, "Relocation fix failed: %s", error.what());
+      }
+    } else {
+      Log(ltWarning, "The relocation fix is only applied to DLL targets.");
+    }
   }
 
   MarkSuccess();

@@ -157,6 +157,10 @@ uint16_t ReadPEMachine(const std::wstring& target) {
   return ReadPEInfo(target).machine;
 }
 
+bool ReadPEIsDll(const std::wstring& target) {
+  return ReadPEInfo(target).isDll;
+}
+
 void EmitPEInfo(const std::wstring& target,
                 const std::function<void(const std::string&)>& emit) {
   const ParsedPE info = ReadPEInfo(target);

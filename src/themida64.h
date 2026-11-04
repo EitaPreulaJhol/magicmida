@@ -13,7 +13,8 @@ class ThemidaDebugger64 : public ThemidaCommon {
  public:
   ThemidaDebugger64(const std::wstring& executable,
                     const std::wstring& parameters, bool createData,
-                    bool useScyllaHide = true);
+                    bool useScyllaHide = true,
+                    bool fixRelocations = false);
   ~ThemidaDebugger64() override = default;
 
  protected:

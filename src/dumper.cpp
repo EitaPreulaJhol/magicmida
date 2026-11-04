@@ -127,6 +127,23 @@ void Dumper::DumpToFile(const std::wstring& fileName, PEHeader& pe,
     pe.ntHeaders.OptionalHeader.DllCharacteristics &= ~0x40;
   }
 
+  // The dumped bytes were read from imageBase_. If the loader relocated the
+  // image, the in-memory header still reports the preferred base, and every
+  // absolute address in the dump is relative to imageBase_ instead. Keep the
+  // header consistent with the contents.
+  if (static_cast<uintptr_t>(pe.ntHeaders.OptionalHeader.ImageBase) !=
+      imageBase_) {
+    LogF(ltWarning,
+         "Header image base %llX does not match the load address %llX; "
+         "updating the dump header.",
+         static_cast<unsigned long long>(
+             pe.ntHeaders.OptionalHeader.ImageBase),
+         static_cast<unsigned long long>(imageBase_));
+    pe.ntHeaders.OptionalHeader.ImageBase =
+        static_cast<decltype(pe.ntHeaders.OptionalHeader.ImageBase)>(
+            imageBase_);
+  }
+
   pe.SaveToStream(file);
 
   file.Seek(iatRawOffset, Stream::Origin::Begin);

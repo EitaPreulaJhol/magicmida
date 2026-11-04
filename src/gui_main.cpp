@@ -3,6 +3,7 @@
 #include "common.h"
 #include "patcher.h"
 #include "pe_report.h"
+#include "reloc_fix.h"
 #include "scyllahide.h"
 
 #if defined(_WIN64)
@@ -40,6 +41,7 @@ enum ControlId : int {
   IDC_COMMAND,
   IDC_DATA_SECTIONS,
   IDC_NO_SCYLLA,
+  IDC_FIX_RELOCS,
   IDC_PID_LABEL,
   IDC_PID,
   IDC_START,
@@ -72,6 +74,7 @@ struct AppState {
   HWND command = nullptr;
   HWND dataSections = nullptr;
   HWND noScylla = nullptr;
+  HWND fixRelocs = nullptr;
   HWND pidLabel = nullptr;
   HWND pid = nullptr;
   HWND start = nullptr;
@@ -104,6 +107,7 @@ struct Job {
   std::wstring target;
   bool createDataSections = false;
   bool useScyllaHide = true;
+  bool fixRelocations = false;
   bool useWorker = false;
   DWORD pid = 0;
 };
@@ -200,14 +204,29 @@ int SelectedCommand() {
       SendMessageW(g_app.command, CB_GETITEMDATA, selection, 0));
 }
 
+bool TargetIsDll() {
+  const std::wstring target = GetText(g_app.target);
+  if (target.empty() || !FileExists(target)) {
+    return false;
+  }
+  try {
+    return ReadPEIsDll(target);
+  } catch (...) {
+    return false;
+  }
+}
+
 void UpdateCommandUi() {
   const int selection = SelectedCommand();
   const bool unpack = selection == static_cast<int>(Command::Unpack);
+  const bool shrink = selection == static_cast<int>(Command::Shrink);
   const bool dumpCode = selection == static_cast<int>(Command::DumpCode);
   const bool enabled = !g_app.running;
+  const bool dllTarget = (unpack || shrink) && TargetIsDll();
 
   EnableWindow(g_app.dataSections, enabled && unpack);
   EnableWindow(g_app.noScylla, enabled && unpack);
+  EnableWindow(g_app.fixRelocs, enabled && dllTarget);
   EnableWindow(g_app.pidLabel, enabled && dumpCode);
   EnableWindow(g_app.pid, enabled && dumpCode);
 }
@@ -280,6 +299,8 @@ bool ReadJob(Job* job, std::wstring* error) {
       SendMessageW(g_app.dataSections, BM_GETCHECK, 0, 0) == BST_CHECKED;
   job->useScyllaHide =
       SendMessageW(g_app.noScylla, BM_GETCHECK, 0, 0) != BST_CHECKED;
+  job->fixRelocations =
+      SendMessageW(g_app.fixRelocs, BM_GETCHECK, 0, 0) == BST_CHECKED;
   job->pid = 0;
 
   if (job->target.empty()) {
@@ -289,6 +310,9 @@ bool ReadJob(Job* job, std::wstring* error) {
   if (!FileExists(job->target)) {
     *error = L"Target file not found.";
     return false;
+  }
+  if (job->fixRelocations && !TargetIsDll()) {
+    job->fixRelocations = false;
   }
 
   return true;
@@ -402,7 +426,8 @@ bool RunWorkerJob(const Job& job) {
       std::to_wstring(static_cast<int>(job.command)) + L" " +
       std::to_wstring(job.pid) + L" " +
       (job.createDataSections ? L"1" : L"0") + L" " +
-      (job.useScyllaHide ? L"1" : L"0") + L" \"" + job.target + L"\"";
+      (job.useScyllaHide ? L"1" : L"0") + L" " +
+      (job.fixRelocations ? L"1" : L"0") + L" \"" + job.target + L"\"";
 
   PROCESS_INFORMATION process{};
   const BOOL created = CreateProcessW(
@@ -482,10 +507,10 @@ bool ExecuteJob(const Job& job) {
       case Command::Unpack: {
 #if defined(_WIN64)
         ThemidaDebugger64 debugger(job.target, L"", job.createDataSections,
-                                   job.useScyllaHide);
+                                   job.useScyllaHide, job.fixRelocations);
 #else
         ThemidaDebugger debugger(job.target, L"", job.createDataSections,
-                                 job.useScyllaHide);
+                                 job.useScyllaHide, job.fixRelocations);
 #endif
         debugger.Run();
         success = debugger.Succeeded();
@@ -494,6 +519,13 @@ bool ExecuteJob(const Job& job) {
       case Command::Shrink: {
         Patcher patcher(job.target);
         patcher.ProcessShrink();
+        if (job.fixRelocations) {
+          try {
+            FixDllRelocations(job.target, 0);
+          } catch (const std::exception& error) {
+            LogF(ltWarning, "Relocation fix failed: %s", error.what());
+          }
+        }
         success = true;
         break;
       }
@@ -662,6 +694,9 @@ void CreateControls(HWND hwnd) {
   g_app.noScylla = CreateChild(L"BUTTON", L"Disable ScyllaHide",
                                BS_AUTOCHECKBOX | WS_TABSTOP, 0,
                                IDC_NO_SCYLLA);
+  g_app.fixRelocs = CreateChild(L"BUTTON", L"Fix DLL relocations",
+                                BS_AUTOCHECKBOX | WS_TABSTOP, 0,
+                                IDC_FIX_RELOCS);
   g_app.pidLabel =
       CreateChild(L"STATIC", L"PID:", SS_LEFT, 0, IDC_PID_LABEL);
   g_app.pid = CreateChild(L"EDIT", L"0", ES_NUMBER | WS_TABSTOP,
@@ -713,7 +748,7 @@ void CreateControls(HWND hwnd) {
   const HWND normalFontControls[] = {
       g_app.targetLabel, g_app.target,      g_app.browse,
       g_app.commandLabel, g_app.command,    g_app.dataSections,
-      g_app.noScylla,     g_app.pidLabel,   g_app.pid,
+      g_app.noScylla,     g_app.fixRelocs,   g_app.pidLabel,   g_app.pid,
       g_app.start,        g_app.status,
   };
   for (HWND control : normalFontControls) {
@@ -746,6 +781,7 @@ void Layout(HWND hwnd) {
   const int commandWidth = Dip(140);
   const int dataSectionsWidth = Dip(124);
   const int noScyllaWidth = Dip(124);
+  const int fixRelocsWidth = Dip(124);
   const int pidLabelWidth = Dip(30);
   const int pidEditWidth = Dip(48);
   const int startWidth = Dip(72);
@@ -770,7 +806,9 @@ void Layout(HWND hwnd) {
              labelHeight, TRUE);
   x += dataSectionsWidth + Dip(6);
   MoveWindow(g_app.noScylla, x, y + Dip(2), noScyllaWidth, labelHeight, TRUE);
-  x += noScyllaWidth + Dip(8);
+  x += noScyllaWidth + Dip(6);
+  MoveWindow(g_app.fixRelocs, x, y + Dip(2), fixRelocsWidth, labelHeight, TRUE);
+  x += fixRelocsWidth + Dip(8);
   MoveWindow(g_app.pidLabel, x, y + Dip(2), pidLabelWidth, labelHeight, TRUE);
   x += pidLabelWidth + Dip(4);
   MoveWindow(g_app.pid, x, y, pidEditWidth, rowHeight, TRUE);
@@ -821,6 +859,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
           return 0;
         case IDC_COMMAND:
           if (notification == CBN_SELCHANGE) {
+            UpdateCommandUi();
+          }
+          return 0;
+        case IDC_TARGET:
+          if (notification == EN_CHANGE) {
             UpdateCommandUi();
           }
           return 0;
@@ -953,7 +996,7 @@ void WorkerLogSink(LogMsgType type, const std::string& message) {
 }
 
 int RunWorkerMode(int argumentCount, wchar_t** arguments) {
-  if (argumentCount < 7) {
+  if (argumentCount < 8) {
     return 2;
   }
 
@@ -968,7 +1011,8 @@ int RunWorkerMode(int argumentCount, wchar_t** arguments) {
   job.pid = static_cast<DWORD>(wcstoul(arguments[3], nullptr, 10));
   job.createDataSections = wcscmp(arguments[4], L"1") == 0;
   job.useScyllaHide = wcscmp(arguments[5], L"0") != 0;
-  job.target = arguments[6];
+  job.fixRelocations = wcscmp(arguments[6], L"1") == 0;
+  job.target = arguments[7];
   job.useWorker = false;
 
   SetLog(WorkerLogSink);
@@ -1040,7 +1084,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
       GetSystemMetrics(SM_CXSCREEN) - Dip(40);
   const int maxWindowHeight =
       GetSystemMetrics(SM_CYSCREEN) - Dip(80);
-  const int windowWidth = std::min(Dip(780), maxWindowWidth);
+  const int windowWidth = std::min(Dip(900), maxWindowWidth);
   const int windowHeight = std::min(Dip(430), maxWindowHeight);
 
   // Fixed-size classic window: no thick frame and no maximize box.

@@ -36,6 +36,10 @@ Then:
 - Select a target or drag one onto the window.
 - Pick the function from the drop-down list.
 - `Create data sections` and `Disable ScyllaHide` apply to Unpack.
+- `Fix DLL relocations` applies to Unpack and Shrink and is only enabled when
+  the target is a DLL. It rebuilds the `.reloc` section so the file can be
+  rebased. For Shrink, the `ImageBase` stored in the header is used as the dump
+  base.
 - `PID` is used by Dump code.
 - The log pane shows all output. The menus hold Open, Clear log, and About.
 
@@ -131,9 +135,18 @@ These limitations come from the original Magicmida:
   virtualized, the dump can be broken, or it may run only on the machine that
   produced it, since many anti-dumps rely on DLL base addresses. One specific
   PE-header anti-dump is mitigated automatically for virtualized entry points.
-  The other variants are not.
+  The other variants are not. If the loader relocated the image, the dumper
+  rewrites the header `ImageBase` to the actual load address, so the dump is at
+  least internally consistent.
 * Unpacked DLLs lose their relocation information. That can cause trouble when
-  loading them into larger applications.
+  loading them into larger applications. The `Fix DLL relocations` option
+  scans the dump for absolute pointers into the image and rebuilds a `.reloc`
+  section, merging any entries that survived unpacking. The dump header already
+  stores the address the image was loaded at, so the reconstructed deltas are
+  consistent. The scan is heuristic (an integer that happens to fall inside the
+  image looks like a pointer), so verify the DLL after loading it at a
+  different base. The option is available for Unpack and Shrink and is off by
+  default.
 * Targets from 2007 to 2009 may not unpack on modern Windows. Windows XP may be
   required.
 * Do not enable compatibility mode for Magicmida or the target. Shimming breaks
@@ -154,6 +167,7 @@ src/
   common.*            logging, formatting, paths, pattern scanning, Win32 helpers
   stream.*            TFileStream/TMemoryStream replacements
   pe_info.*           PE header/section editing
+  reloc_fix.*         DLL base relocation reconstruction
   disasm.*            packed BeaEngine interface + DisasmCheck
   debugger_core.*     process creation, debug loop, HW/SW breakpoints
   tracer.*            single-step tracer

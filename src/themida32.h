@@ -14,7 +14,8 @@ namespace magicmida {
 class ThemidaDebugger : public ThemidaCommon {
  public:
   ThemidaDebugger(const std::wstring& executable, const std::wstring& parameters,
-                  bool createData, bool useScyllaHide = true);
+                  bool createData, bool useScyllaHide = true,
+                  bool fixRelocations = false);
   ~ThemidaDebugger() override = default;
 
  protected:

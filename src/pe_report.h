@@ -15,4 +15,8 @@ void EmitPEInfo(const std::wstring& target,
 // Returns IMAGE_FILE_MACHINE_* for the target. Throws on I/O or malformed PE.
 uint16_t ReadPEMachine(const std::wstring& target);
 
+// Returns true when the target PE has IMAGE_FILE_DLL set. Throws on I/O or
+// malformed PE.
+bool ReadPEIsDll(const std::wstring& target);
+
 }  // namespace magicmida
