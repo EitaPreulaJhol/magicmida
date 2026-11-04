@@ -222,6 +222,8 @@ Dumper::Dumper(const PROCESS_INFORMATION& process,
     if (!RPM(imageBase_, headerSnapshot_.data(), headerSnapshot_.size())) {
       headerSnapshot_.clear();
       Log(ltWarning, "Could not capture the PE header before tracing.");
+    } else {
+      Log(ltInfo, "Captured the PE header at OEP.");
     }
   }
 }
