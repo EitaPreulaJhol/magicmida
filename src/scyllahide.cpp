@@ -35,6 +35,12 @@ struct Session {
   std::vector<uint8_t> image;
   void* remoteBase = nullptr;
   HOOK_DLL_DATA hookData{};
+
+  ~Session() {
+    if (process != nullptr) {
+      CloseHandle(process);
+    }
+  }
 };
 
 std::unique_ptr<Session> g_session;
@@ -284,7 +290,11 @@ bool Start(HANDLE process, DWORD processId, const Profile& profile,
   }
 
   auto session = std::make_unique<Session>();
-  session->process = process;
+  if (!DuplicateHandle(GetCurrentProcess(), process, GetCurrentProcess(),
+                       &session->process, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+    *error = "could not duplicate the process handle";
+    return false;
+  }
 
   if (!LoadEmbeddedHookLibrary(&session->image, error)) {
     return false;

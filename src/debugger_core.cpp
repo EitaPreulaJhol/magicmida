@@ -4,6 +4,7 @@
 
 #include "dumper.h"
 #include "pe_info.h"
+#include "scyllahide.h"
 #include "stream.h"
 
 #include <algorithm>
@@ -194,6 +195,10 @@ void DebuggerCore::TerminateDebuggee() {
 }
 
 void DebuggerCore::CloseProcessHandles() {
+  // Drop the ScyllaHide session first: it owns a duplicate of the process
+  // handle.
+  scyllahide::Stop();
+
   for (auto& entry : threads_) {
     if (entry.second != nullptr && entry.second != INVALID_HANDLE_VALUE) {
       CloseHandle(entry.second);
@@ -216,7 +221,15 @@ void DebuggerCore::Detach() {
     SuspendThread(entry.second);
   }
 
-  if (DebugActiveProcessStop(process_.dwProcessId)) {
+  const BOOL detached = DebugActiveProcessStop(process_.dwProcessId);
+
+  // Undo the suspend performed above; otherwise the detached target would
+  // stay frozen forever.
+  for (const auto& entry : threads_) {
+    ResumeThread(entry.second);
+  }
+
+  if (detached) {
     Log(ltInfo, "Detached.");
   } else {
     Log(ltFatal, "Detaching failed.");
@@ -594,13 +607,23 @@ void DebuggerCore::MakeDLLExecutable() {
 
   FileStream file(dllExecutable_, FileStream::Mode::ReadWrite);
   uint8_t header[0x1000]{};
-  file.Read(header, sizeof(header));
+  const size_t toRead = static_cast<size_t>(
+      std::min<int64_t>(static_cast<int64_t>(sizeof(header)), file.Size()));
+  if (toRead < sizeof(IMAGE_DOS_HEADER)) {
+    throw std::runtime_error("Copy of the DLL is too small");
+  }
+  file.Read(header, toRead);
 
-  auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
-      header + reinterpret_cast<IMAGE_DOS_HEADER*>(header)->e_lfanew);
+  const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(header);
+  if (static_cast<uint32_t>(dosHeader->e_lfanew) > 0xF00 ||
+      static_cast<size_t>(dosHeader->e_lfanew) + sizeof(IMAGE_NT_HEADERS) >
+          toRead) {
+    throw std::runtime_error("Copy of the DLL has a malformed PE header");
+  }
+
+  auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(header + dosHeader->e_lfanew);
   nt->FileHeader.Characteristics &= ~IMAGE_FILE_DLL;
-  file.Seek(reinterpret_cast<IMAGE_DOS_HEADER*>(header)->e_lfanew + 22,
-            Stream::Origin::Begin);
+  file.Seek(dosHeader->e_lfanew + 22, Stream::Origin::Begin);
   file.Write(&nt->FileHeader.Characteristics,
              sizeof(nt->FileHeader.Characteristics));
 
@@ -615,7 +638,7 @@ void DebuggerCore::MakeDLLExecutable() {
                sizeof(nt->OptionalHeader.DllCharacteristics));
   }
 
-  PEHeader pe(header, sizeof(header));
+  PEHeader pe(header, toRead);
   PESection* epSection = pe.GetSectionByVA(nt->OptionalHeader.AddressOfEntryPoint);
   if (epSection == nullptr || epSection->Header.SizeOfRawData < kStubSize) {
     throw std::runtime_error("Not enough room in EP section");

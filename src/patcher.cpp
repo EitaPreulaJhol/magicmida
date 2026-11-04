@@ -2,6 +2,8 @@
 // Post-processing of unpacked files (ported from Patcher.pas).
 #include "patcher.h"
 
+#include <psapi.h>
+
 #include <algorithm>
 #include <cstring>
 
@@ -40,26 +42,32 @@ void Patcher::ProcessShrink() {
   stream_.SaveToFile(fileName_);
 }
 
-void Patcher::ProcessMkData() {
+bool Patcher::ProcessMkData() {
 #if defined(_WIN64)
   Log(ltInfo, "Data section creation is not available for 64-bit binaries.");
-  return;
+  return false;
 #else
   const std::string lower = AsciiLowerCase(WideToUtf8(fileName_));
   const size_t posMs = lower.rfind("maplestory");
+  bool created = false;
   if (posMs != std::string::npos && posMs > 0 &&
       PosFrom(lower, ".exe", posMs) < posMs + 10 + 10) {
-    MapleCreateDataSections();
+    created = MapleCreateDataSections();
   } else if (pe_->ntHeaders.OptionalHeader.MajorLinkerVersion == 14) {
     // MSVC 2015+
-    MSVCCreateDataSections();
+    created = MSVCCreateDataSections();
   } else {
     Log(ltInfo, "Data section creation not available for this compiler.");
-    return;
+    return false;
+  }
+
+  if (!created) {
+    return false;
   }
 
   pe_->SaveToStream(stream_);
   stream_.SaveToFile(fileName_);
+  return true;
 #endif
 }
 
@@ -84,10 +92,11 @@ void Patcher::ShrinkPE() {
   for (int i = 0; i <= lastIndex; ++i) {
     const IMAGE_SECTION_HEADER& header = pe_->Sections()[static_cast<size_t>(i)].Header;
     const std::string name = SectionName(header);
-    // .xdata holds the unwind/exception data referenced by .pdata; it is not
-    // covered by a data directory, so keep it explicitly.
+    // .xdata holds the unwind/exception data referenced by .pdata; .CRT and
+    // .tls hold the CRT initializers and TLS callbacks. None of them are
+    // covered by a data directory, so keep them explicitly.
     if (!isReferenced(header) && name != ".data" && name != ".rdata" &&
-        name != ".xdata" && i > 0) {
+        name != ".xdata" && name != ".CRT" && name != ".tls" && i > 0) {
       deleted.push_back(i);
       if (i != lastIndex) {
         stream_.Seek(
@@ -190,7 +199,12 @@ void Patcher::ShrinkExportSect() {
 
 #if !defined(_WIN64)
 
-void Patcher::MapleCreateDataSections() {
+bool Patcher::MapleCreateDataSections() {
+  if (pe_->Sections().size() < 2) {
+    Log(ltFatal, "Data section creation requires at least two sections.");
+    return false;
+  }
+
   uint8_t* const memory = stream_.Memory();
   const int64_t streamSize = stream_.Size();
 
@@ -379,6 +393,7 @@ void Patcher::MapleCreateDataSections() {
 
   pe_->Sections()[0].Rename(".text");
   pe_->Sections()[0].Header.Characteristics &= ~IMAGE_SCN_MEM_WRITE;
+  return true;
 }
 
 uintptr_t Patcher::FindDataStartMSVC6() {
@@ -463,15 +478,25 @@ bool Patcher::FindDynTLSMSVC14(uintptr_t& dynTlsInit) {
   return true;
 }
 
-void Patcher::MSVCCreateDataSections() {
+bool Patcher::MSVCCreateDataSections() {
+  if (pe_->Sections().size() < 2) {
+    Log(ltFatal, "Data section creation requires at least two sections.");
+    return false;
+  }
+
   const uint32_t baseOfData = pe_->ntHeaders.OptionalHeader.BaseOfData;
-  if (baseOfData > pe_->Sections()[0].Header.VirtualAddress &&
-      baseOfData < pe_->Sections()[0].Header.VirtualAddress +
-                       pe_->Sections()[0].Header.Misc.VirtualSize &&
-      (baseOfData & 0xFFF) == 0) {
+  if (!(baseOfData > pe_->Sections()[0].Header.VirtualAddress &&
+        baseOfData < pe_->Sections()[0].Header.VirtualAddress +
+                         pe_->Sections()[0].Header.Misc.VirtualSize &&
+        (baseOfData & 0xFFF) == 0)) {
+    Log(ltInfo, "Assuming sections are not merged.");
+    return false;
+  }
+
+  {
     uintptr_t dynTls = 0;
     if (!FindDynTLSMSVC14(dynTls)) {
-      return;
+      return false;
     }
 
     // This is by no means exact. We keep the writable data section as large
@@ -534,18 +559,17 @@ void Patcher::MSVCCreateDataSections() {
            header.VirtualAddress,
            header.VirtualAddress + header.Misc.VirtualSize);
     }
-  } else {
-    Log(ltInfo, "Assuming sections are not merged.");
   }
 
   // Rename first section and remove WRITE characteristic.
   pe_->Sections()[0].Rename(".text");
   pe_->Sections()[0].Header.Characteristics &= ~IMAGE_SCN_MEM_WRITE;
+  return true;
 }
 
 #else
 
-void Patcher::MapleCreateDataSections() {
+bool Patcher::MapleCreateDataSections() {
   throw std::runtime_error(
       "Data section creation is not available for 64-bit binaries.");
 }
@@ -554,7 +578,7 @@ uintptr_t Patcher::FindDataStartMSVC6() { return 0; }
 
 bool Patcher::FindDynTLSMSVC14(uintptr_t& /*dynTlsInit*/) { return false; }
 
-void Patcher::MSVCCreateDataSections() {
+bool Patcher::MSVCCreateDataSections() {
   throw std::runtime_error(
       "Data section creation is not available for 64-bit binaries.");
 }
@@ -567,11 +591,52 @@ void Patcher::DumpProcessCode(HANDLE process) {
   throw std::runtime_error(
       "Dumping process code is not available for 64-bit binaries.");
 #else
+  uintptr_t imageBase =
+      static_cast<uintptr_t>(pe_->ntHeaders.OptionalHeader.ImageBase);
+
+  // The file's ImageBase is only a hint: the live process may have been
+  // relocated (ASLR or an occupied base). Find the module by name and use its
+  // real base instead.
+  const std::wstring moduleFileName = ExtractFileName(fileName_);
+  const std::string targetName =
+      AsciiLowerCase(WideToUtf8(moduleFileName));
+  bool moduleFound = false;
+
+  HMODULE modules[1024]{};
+  DWORD needed = 0;
+  if (EnumProcessModules(process, modules, sizeof(modules), &needed)) {
+    const size_t count =
+        std::min<size_t>(needed / sizeof(HMODULE), _countof(modules));
+    for (size_t i = 0; i < count; ++i) {
+      wchar_t moduleName[MAX_PATH]{};
+      if (GetModuleBaseNameW(process, modules[i], moduleName,
+                             _countof(moduleName)) == 0) {
+        continue;
+      }
+      if (AsciiLowerCase(WideToUtf8(moduleName)) == targetName) {
+        imageBase = reinterpret_cast<uintptr_t>(modules[i]);
+        moduleFound = true;
+        break;
+      }
+    }
+  }
+
+  if (moduleFound) {
+    LogF(ltInfo, "Using live module base %llX for %s",
+         static_cast<unsigned long long>(imageBase),
+         WideToUtf8(moduleFileName).c_str());
+  } else {
+    LogF(ltWarning,
+         "Module %s not found in the process; using the header ImageBase "
+         "%llX",
+         WideToUtf8(moduleFileName).c_str(),
+         static_cast<unsigned long long>(imageBase));
+  }
+
   const uintptr_t startAddress =
-      pe_->ntHeaders.OptionalHeader.ImageBase +
-      pe_->Sections()[0].Header.VirtualAddress;
-  const uintptr_t endAddress = pe_->ntHeaders.OptionalHeader.ImageBase +
-                               pe_->ntHeaders.OptionalHeader.BaseOfData;
+      imageBase + pe_->Sections()[0].Header.VirtualAddress;
+  const uintptr_t endAddress =
+      imageBase + pe_->ntHeaders.OptionalHeader.BaseOfData;
 
   std::vector<uint8_t> buffer(static_cast<size_t>(endAddress - startAddress));
   SIZE_T bytesRead = 0;

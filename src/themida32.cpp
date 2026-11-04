@@ -1391,7 +1391,9 @@ void ThemidaDebugger::FinishUnpacking(uintptr_t oep) {
 
   if (createDataSections_) {
     Patcher patcher(fileName);
-    patcher.ProcessMkData();
+    if (!patcher.ProcessMkData()) {
+      Log(ltWarning, "Data sections were not created.");
+    }
   }
 
   if (fixRelocations_) {

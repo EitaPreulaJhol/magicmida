@@ -180,6 +180,14 @@ bool ReadPEIsDll(const std::wstring& target) {
   return ReadPEInfo(target).isDll;
 }
 
+PEFlags ReadPEFlags(const std::wstring& target) {
+  const ParsedPE info = ReadPEInfo(target);
+  PEFlags flags;
+  flags.machine = info.machine;
+  flags.isDll = info.isDll;
+  return flags;
+}
+
 void EmitPEInfo(const std::wstring& target,
                 const std::function<void(const std::string&)>& emit) {
   const ParsedPE info = ReadPEInfo(target);

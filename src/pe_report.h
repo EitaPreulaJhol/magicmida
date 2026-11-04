@@ -15,6 +15,15 @@ void EmitPEInfo(const std::wstring& target,
 // Returns IMAGE_FILE_MACHINE_* for the target. Throws on I/O or malformed PE.
 uint16_t ReadPEMachine(const std::wstring& target);
 
+struct PEFlags {
+  uint16_t machine = 0;
+  bool isDll = false;
+};
+
+// Returns the machine type and the IMAGE_FILE_DLL flag in one read. Throws on
+// I/O or malformed PE.
+PEFlags ReadPEFlags(const std::wstring& target);
+
 // Returns true when the target PE has IMAGE_FILE_DLL set. Throws on I/O or
 // malformed PE.
 bool ReadPEIsDll(const std::wstring& target);

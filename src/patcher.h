@@ -20,7 +20,7 @@ class Patcher {
   Patcher& operator=(const Patcher&) = delete;
 
   void ProcessShrink();
-  void ProcessMkData();
+  bool ProcessMkData();
 
   void DumpProcessCode(HANDLE process);
 
@@ -31,8 +31,8 @@ class Patcher {
   // Proper section characteristics are important for MSVC applications
   // because they check them during C runtime initialization (especially
   // .rdata).
-  void MapleCreateDataSections();
-  void MSVCCreateDataSections();
+  bool MapleCreateDataSections();
+  bool MSVCCreateDataSections();
 
   uintptr_t FindDataStartMSVC6();
   bool FindDynTLSMSVC14(uintptr_t& dynTlsInit);

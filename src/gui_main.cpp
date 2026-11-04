@@ -33,6 +33,7 @@ constexpr wchar_t kWindowClass[] = L"MagicmidaGuiWindow";
 constexpr wchar_t kWindowTitle[] = L"Magicmida";
 constexpr WORD kWorkerResourceId = 103;
 constexpr WORD kRtRcData = 10;
+constexpr UINT_PTR kTargetTimerId = 1;
 
 enum ControlId : int {
   IDC_TARGET_LABEL = 100,
@@ -206,28 +207,36 @@ int SelectedCommand() {
       SendMessageW(g_app.command, CB_GETITEMDATA, selection, 0));
 }
 
-bool TargetIsDll() {
-  const std::wstring target = GetText(g_app.target);
-  if (target.empty() || !FileExists(target)) {
-    return false;
-  }
-  try {
-    return ReadPEIsDll(target);
-  } catch (...) {
-    return false;
-  }
-}
+struct TargetFlags {
+  std::wstring path;
+  uint16_t machine = 0;
+  bool isDll = false;
+};
 
-uint16_t TargetMachine() {
+TargetFlags g_targetFlags;
+
+// Reads the target PE flags once per path. UpdateCommandUi is called for
+// every EN_CHANGE, so without the cache (and the debounce timer) a network
+// path could stall the UI.
+const TargetFlags& CurrentTargetFlags() {
   const std::wstring target = GetText(g_app.target);
+  if (target == g_targetFlags.path) {
+    return g_targetFlags;
+  }
+
+  g_targetFlags = TargetFlags{};
+  g_targetFlags.path = target;
   if (target.empty() || !FileExists(target)) {
-    return 0;
+    return g_targetFlags;
   }
+
   try {
-    return ReadPEMachine(target);
+    const PEFlags flags = ReadPEFlags(target);
+    g_targetFlags.machine = flags.machine;
+    g_targetFlags.isDll = flags.isDll;
   } catch (...) {
-    return 0;
   }
+  return g_targetFlags;
 }
 
 void UpdateCommandUi() {
@@ -236,8 +245,9 @@ void UpdateCommandUi() {
   const bool shrink = selection == static_cast<int>(Command::Shrink);
   const bool dumpCode = selection == static_cast<int>(Command::DumpCode);
   const bool enabled = !g_app.running;
-  const bool dllTarget = (unpack || shrink) && TargetIsDll();
-  const bool canCreateData = TargetMachine() == IMAGE_FILE_MACHINE_I386;
+  const TargetFlags& target = CurrentTargetFlags();
+  const bool dllTarget = (unpack || shrink) && target.isDll;
+  const bool canCreateData = target.machine == IMAGE_FILE_MACHINE_I386;
 
   EnableWindow(g_app.dataSections, enabled && unpack && canCreateData);
   EnableWindow(g_app.noScylla, enabled && unpack);
@@ -326,11 +336,11 @@ bool ReadJob(Job* job, std::wstring* error) {
     *error = L"Target file not found.";
     return false;
   }
-  if (job->fixRelocations && !TargetIsDll()) {
+  if (job->fixRelocations && !CurrentTargetFlags().isDll) {
     job->fixRelocations = false;
   }
   if (job->createDataSections &&
-      TargetMachine() != IMAGE_FILE_MACHINE_I386) {
+      CurrentTargetFlags().machine != IMAGE_FILE_MACHINE_I386) {
     // MkData only exists in the 32-bit build; the 64-bit debugger ignores it.
     job->createDataSections = false;
   }
@@ -519,7 +529,36 @@ bool RunWorkerJob(const Job& job) {
 }
 #endif
 
+bool PrepareOutputFile(const std::wstring& target) {
+  const std::wstring output = MakeUnpackedFileName(target);
+  if (FileExists(output)) {
+    LogF(ltWarning,
+         "The output file already exists and will be overwritten: %s",
+         WideToUtf8(output).c_str());
+  }
+
+  // Fail before starting the debugger when the dump cannot be written (for
+  // example, it is loaded in another process or read-only).
+  HANDLE probe = CreateFileW(output.c_str(), GENERIC_WRITE, 0, nullptr,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (probe == INVALID_HANDLE_VALUE) {
+    const DWORD error = GetLastError();
+    if (error != ERROR_FILE_NOT_FOUND) {
+      LogF(ltFatal, "The output file is not writable: %s (error %lu)",
+           WideToUtf8(output).c_str(), error);
+      return false;
+    }
+    return true;
+  }
+  CloseHandle(probe);
+  return true;
+}
+
 bool ExecuteJob(const Job& job) {
+  if (job.command == Command::Unpack && !PrepareOutputFile(job.target)) {
+    return false;
+  }
+
   if (job.useWorker) {
     return RunWorkerJob(job);
   }
@@ -554,8 +593,7 @@ bool ExecuteJob(const Job& job) {
       }
       case Command::MkData: {
         Patcher patcher(job.target);
-        patcher.ProcessMkData();
-        success = true;
+        success = patcher.ProcessMkData();
         break;
       }
       case Command::DumpCode: {
@@ -910,6 +948,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
       Layout(hwnd);
       return 0;
 
+    case WM_TIMER:
+      if (wParam == kTargetTimerId) {
+        KillTimer(hwnd, kTargetTimerId);
+        UpdateCommandUi();
+      }
+      return 0;
+
     case WM_COMMAND: {
       const int id = LOWORD(wParam);
       const int notification = HIWORD(wParam);
@@ -928,7 +973,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
           return 0;
         case IDC_TARGET:
           if (notification == EN_CHANGE) {
-            UpdateCommandUi();
+            // Debounce: reading the PE flags on every keystroke can stall on
+            // slow (network) paths.
+            SetTimer(hwnd, kTargetTimerId, 250, nullptr);
           }
           return 0;
         case IDM_CLEAR_LOG:
@@ -999,6 +1046,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
       return 0;
 
     case WM_DESTROY:
+      KillTimer(hwnd, kTargetTimerId);
       if (g_app.worker != nullptr) {
         CloseHandle(g_app.worker);
         g_app.worker = nullptr;

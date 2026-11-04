@@ -181,6 +181,9 @@ void MemoryStream::Write(const void* buffer, size_t size) {
   if (size == 0) {
     return;
   }
+  if (position_ < 0) {
+    throw std::runtime_error("MemoryStream write with negative position");
+  }
   EnsureCapacity(position_ + static_cast<int64_t>(size));
   std::memcpy(buffer_.data() + position_, buffer, size);
   position_ += static_cast<int64_t>(size);
@@ -216,6 +219,9 @@ void MemoryStream::SetSize(int64_t size) {
 }
 
 void MemoryStream::SetPosition(int64_t position) {
+  if (position < 0) {
+    throw std::runtime_error("MemoryStream position cannot be negative");
+  }
   position_ = position;
 }
 

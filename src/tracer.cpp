@@ -36,7 +36,9 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
   }
 
   if (!ContinueDebugEvent(processId_, threadId_, DBG_CONTINUE)) {
-    return;
+    throw std::runtime_error(
+        Format("ContinueDebugEvent failed during tracing (error %lu)",
+               GetLastError()));
   }
 
   DWORD status = DBG_EXCEPTION_NOT_HANDLED;
@@ -61,15 +63,17 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
             EXCEPTION_SINGLE_STEP) {
           status = OnSingleStep(debugEvent);
           if (status == DBG_CONTROL_BREAK) {
+            // Leave the single-step event pending on purpose: the target
+            // stays stopped at the traced address until the next Trace()
+            // redirects it. The caller terminates the target before dumping.
             return;
           }
         } else {
-          LogF(ltFatal,
-               "Unexpected exception during tracing: %.8X at %p in thread %lu",
-               MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionCode,
-               MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionAddress,
-               debugEvent.dwThreadId);
-          return;
+          throw std::runtime_error(Format(
+              "Unexpected exception during tracing: %.8X at %p in thread %lu",
+              MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionCode,
+              MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionAddress,
+              debugEvent.dwThreadId));
         }
         break;
 
@@ -80,6 +84,10 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
 
     ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, status);
   }
+
+  throw std::runtime_error(
+      Format("WaitForDebugEvent failed during tracing (error %lu)",
+             GetLastError()));
 }
 
 DWORD Tracer::OnSingleStep(const DEBUG_EVENT& /*debugEvent*/) {
