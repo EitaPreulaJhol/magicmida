@@ -30,8 +30,7 @@ MkData and Dump code are rejected for 64-bit targets, matching the original
 
 ## Using it
 
-Start `magicmida.exe`, optionally with the target path as the first argument.
-Then:
+Start `magicmida.exe`, then:
 
 - Select a target or drag one onto the window. The PE info (architecture,
   type, image base, entry point, relocations, sections) is logged automatically
@@ -143,7 +142,7 @@ cmake --build build/msvc --config Release
 
 ### Dependencies
 
-* [BeaEngine 5.1](https://github.com/Hendi48/beaengine) (LGPLv3). The two
+* [BeaEngine 5.1](https://github.com/BeaEngine/beaengine) (LGPLv3). The two
   prebuilt object files in `vendor/beaengine/` come from the original
   Magicmida repository and are linked into the executable.
 * [ScyllaHide](https://github.com/x64dbg/ScyllaHide) (GPLv3). A pinned, patched
@@ -199,7 +198,6 @@ These limitations come from the original Magicmida:
   Shrink also follows `.text` references to Oreans-style VM entry stubs.
   Use a devirtualizer (e.g. Oreans Unvirtualizer) for the VM code itself,
   then run Shrink again if the VM sections are no longer needed.
-
 * VM anti-dumps are not fixed in general. If the entry point or other code is
   virtualized, the dump can be broken, or it may run only on the machine that
   produced it, since many anti-dumps rely on DLL base addresses. One specific
