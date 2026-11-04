@@ -210,6 +210,7 @@ void Patcher::RelocateExceptionTable() {
     std::vector<uint8_t> padding(rawSize - table.size(), 0);
     stream_.Write(padding.data(), padding.size());
   }
+  stream_.SetPosition(0);
 
   LogF(ltGood,
        "Relocated exception table to [%s] (RVA %X, %zu entries); dropped "
@@ -387,6 +388,7 @@ void Patcher::ShrinkPE() {
   std::vector<int> deleted;
   bool removedExecutable = false;
   MemoryStream newStream;
+  stream_.SetPosition(0);
   newStream.CopyFrom(stream_, pe_->Sections()[0].Header.PointerToRawData);
 
   const int lastIndex = static_cast<int>(pe_->Sections().size()) - 1;
