@@ -20,7 +20,7 @@ file, started hidden, and deleted when the job finishes.
 | Function | Description |
 | --- | --- |
 | Unpack | Unpacks a Themida/WinLicense-protected executable or DLL. The dump is written next to the input with a `U` suffix, so `app.exe` becomes `appU.exe`. |
-| Shrink | Drops sections that are no longer needed after manual unvirtualization. Keeps the entry-point section, referenced sections and runtime data (`.bss`, `.CRT`, `.tls`, `.xdata`, CFG tables), removes only unreferenced executable/discardable sections, keeps the VM section when the entry point jumps into it or when `.text` references a VM entry stub, and writes a `.bak` copy before modifying the file. |
+| Shrink | Drops sections that are no longer needed after manual unvirtualization. Keeps the entry-point section, referenced sections and runtime data (`.bss`, `.CRT`, `.tls`, `.xdata`, CFG tables), removes only unreferenced executable/discardable sections, keeps the VM section when the entry point jumps into it or when `.text` references a VM entry stub, relocates an exception table that lives inside a removable protector section into a new `.pdata` section, and writes a `.bak` copy before modifying the file. |
 | MkData | Restores `.rdata` and `.data`. Needed for MSVC 2015+ targets that use Thread Local Storage, and supported for MapleStory binaries. 32-bit targets only. |
 | Dump code | Overwrites `.text` in an already unpacked file with code from a running process. Useful after Oreans Unvirtualizer in OllyDbg. 32-bit targets only. |
 | Info | Shows PE headers, architecture and sections. Runs automatically when a target is selected; also available as `--info` in the CLI. |
@@ -168,7 +168,10 @@ These limitations come from the original Magicmida:
   make sure the target was fully unvirtualized before shrinking; removing
   sections that are still used by the protector will break the image. When
   the entry point jumps into the protector section (virtualized OEP), Shrink
-  keeps that section and warns instead of breaking startup.
+  keeps that section and warns instead of breaking startup. When the
+  exception table lives inside a removable protector section (`.themida`,
+  `.boot`, `.vmp*`), Shrink copies it to a new `.pdata` section and drops the
+  protector's own entries before removing the section.
 * Magicmida does not devirtualize VM bytecode. It detects a virtualized OEP
   (`jmp`/`call`, `push imm32; jmp`, `push imm32; push imm32; jmp`,
   `push imm; ret`, `mov reg, imm; jmp reg`) and, for 32-bit Themida V3,

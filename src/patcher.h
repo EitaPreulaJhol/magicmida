@@ -25,6 +25,7 @@ class Patcher {
   void DumpProcessCode(HANDLE process);
 
  private:
+  void RelocateExceptionTable();
   void ShrinkPE();
   void ShrinkExportSect();
 

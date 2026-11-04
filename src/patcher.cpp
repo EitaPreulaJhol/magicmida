@@ -37,6 +37,7 @@ Patcher::Patcher(const std::wstring& fileName) : fileName_(fileName) {
 
 void Patcher::ProcessShrink() {
   ReportStatus("Shrinking sections");
+  RelocateExceptionTable();
   ShrinkPE();
   ShrinkExportSect();
 
@@ -72,6 +73,149 @@ bool Patcher::ProcessMkData() {
   stream_.SaveToFile(fileName_);
   return true;
 #endif
+}
+
+// Moves the exception directory out of a protector section so Shrink can
+// remove that section. The table entries that belong to the protector are
+// dropped; application entries keep their original RVAs.
+void Patcher::RelocateExceptionTable() {
+  if (pe_->Sections().size() < 2) {
+    return;
+  }
+
+  IMAGE_DATA_DIRECTORY* directory =
+      &pe_->ntHeaders.OptionalHeader
+           .DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+  if (directory->VirtualAddress == 0 || directory->Size < 12) {
+    return;
+  }
+
+  PESection* tableSection = pe_->GetSectionByVA(directory->VirtualAddress);
+  if (tableSection == nullptr) {
+    return;
+  }
+
+  const int tableIndex =
+      static_cast<int>(tableSection - pe_->Sections().data());
+  if (tableIndex <= 0) {
+    return;
+  }
+
+  const IMAGE_SECTION_HEADER tableHeader = tableSection->Header;
+  const std::string tableName = SectionName(tableHeader);
+  const bool protectorSection =
+      tableName == ".themida" || tableName == ".boot" ||
+      tableName == ".tmd" || tableName == ".winlice" ||
+      tableName.rfind(".vmp", 0) == 0;
+  if (!protectorSection ||
+      (tableHeader.Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0 ||
+      tableHeader.SizeOfRawData == 0) {
+    return;
+  }
+
+  const uint32_t delta =
+      directory->VirtualAddress - tableHeader.VirtualAddress;
+  if (delta >= tableHeader.SizeOfRawData) {
+    return;
+  }
+  const int64_t tableOffset =
+      static_cast<int64_t>(tableHeader.PointerToRawData) + delta;
+  if (tableOffset < 0 ||
+      tableOffset + static_cast<int64_t>(directory->Size) > stream_.Size()) {
+    return;
+  }
+
+  const uint64_t sectionStart = tableHeader.VirtualAddress;
+  const uint64_t sectionEnd =
+      sectionStart + std::max<uint32_t>(
+                         static_cast<uint32_t>(tableHeader.Misc.VirtualSize),
+                         static_cast<uint32_t>(tableHeader.SizeOfRawData));
+  const auto inTableSection = [&](uint32_t rva) {
+    return rva >= sectionStart && rva < sectionEnd;
+  };
+
+  std::vector<uint8_t> table;
+  table.reserve(directory->Size);
+  const size_t count = directory->Size / 12;
+  for (size_t i = 0; i < count; ++i) {
+    const uint8_t* entry = stream_.Memory() + tableOffset +
+                           static_cast<int64_t>(i) * 12;
+    uint32_t begin = 0;
+    uint32_t end = 0;
+    uint32_t unwind = 0;
+    std::memcpy(&begin, entry, sizeof(begin));
+    std::memcpy(&end, entry + 4, sizeof(end));
+    std::memcpy(&unwind, entry + 8, sizeof(unwind));
+    if (inTableSection(begin) || inTableSection(end) ||
+        inTableSection(unwind)) {
+      continue;
+    }
+    table.insert(table.end(), entry, entry + 12);
+  }
+
+  if (table.empty()) {
+    directory->VirtualAddress = 0;
+    directory->Size = 0;
+    return;
+  }
+
+  std::string sectionName = ".pdata";
+  for (const PESection& section : pe_->Sections()) {
+    if (SectionName(section.Header) == sectionName) {
+      sectionName = ".pdata2";
+      break;
+    }
+  }
+
+  const IMAGE_SECTION_HEADER previous = pe_->Sections().back().Header;
+  uint32_t virtualAddress =
+      previous.VirtualAddress + previous.Misc.VirtualSize;
+  pe_->SectionAlign(virtualAddress);
+
+  uint32_t rawOffset = static_cast<uint32_t>(stream_.Size());
+  pe_->FileAlign(rawOffset);
+  uint32_t rawSize = static_cast<uint32_t>(table.size());
+  pe_->FileAlign(rawSize);
+  if (rawSize == 0) {
+    rawSize = pe_->ntHeaders.OptionalHeader.FileAlignment;
+  }
+
+  pe_->AddSectionToArray();
+  PESection& section = pe_->Sections().back();
+  section.Rename(sectionName);
+  section.Header.VirtualAddress = virtualAddress;
+  section.Header.Misc.VirtualSize = static_cast<uint32_t>(table.size());
+  section.Header.PointerToRawData = rawOffset;
+  section.Header.SizeOfRawData = rawSize;
+  section.Header.Characteristics =
+      IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_INITIALIZED_DATA;
+
+  pe_->ntHeaders.FileHeader.NumberOfSections =
+      static_cast<WORD>(pe_->Sections().size());
+  directory->VirtualAddress = virtualAddress;
+  directory->Size = static_cast<uint32_t>(table.size());
+
+  uint32_t sizeOfImage = virtualAddress + static_cast<uint32_t>(table.size());
+  pe_->SectionAlign(sizeOfImage);
+  if (sizeOfImage > pe_->ntHeaders.OptionalHeader.SizeOfImage) {
+    pe_->ntHeaders.OptionalHeader.SizeOfImage = sizeOfImage;
+  }
+
+  if (static_cast<int64_t>(rawOffset) + rawSize > stream_.Size()) {
+    stream_.SetSize(static_cast<int64_t>(rawOffset) + rawSize);
+  }
+  stream_.Seek(rawOffset, Stream::Origin::Begin);
+  stream_.Write(table.data(), table.size());
+  if (rawSize > table.size()) {
+    std::vector<uint8_t> padding(rawSize - table.size(), 0);
+    stream_.Write(padding.data(), padding.size());
+  }
+
+  LogF(ltGood,
+       "Relocated exception table to [%s] (RVA %X, %zu entries); dropped "
+       "%zu protector entries.",
+       sectionName.c_str(), virtualAddress, table.size() / 12,
+       count - table.size() / 12);
 }
 
 void Patcher::ShrinkPE() {
