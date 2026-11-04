@@ -42,9 +42,6 @@ enum ControlId : int {
   IDC_BROWSE,
   IDC_COMMAND_LABEL,
   IDC_COMMAND,
-  IDC_DATA_SECTIONS,
-  IDC_NO_SCYLLA,
-  IDC_FIX_RELOCS,
   IDC_PID_LABEL,
   IDC_PID,
   IDC_START,
@@ -60,6 +57,9 @@ enum MenuId : int {
   IDM_COPY_LOG,
   IDM_EXIT,
   IDM_ABOUT,
+  IDM_ADV_DATA_SECTIONS,
+  IDM_ADV_NO_SCYLLA,
+  IDM_ADV_FIX_RELOCS,
 };
 
 constexpr UINT kMsgLog = WM_APP + 1;
@@ -74,20 +74,22 @@ struct LogEntry {
 struct AppState {
   HINSTANCE instance = nullptr;
   HWND hwnd = nullptr;
+  HMENU menu = nullptr;
+  HMENU advancedMenu = nullptr;
   HWND targetLabel = nullptr;
   HWND target = nullptr;
   HWND browse = nullptr;
   HWND commandLabel = nullptr;
   HWND command = nullptr;
-  HWND dataSections = nullptr;
-  HWND noScylla = nullptr;
-  HWND fixRelocs = nullptr;
   HWND pidLabel = nullptr;
   HWND pid = nullptr;
   HWND start = nullptr;
   HWND cancel = nullptr;
   HWND log = nullptr;
   HWND status = nullptr;
+  bool createDataSections = false;
+  bool disableScylla = false;
+  bool fixRelocations = false;
   HANDLE cancelEvent = nullptr;
   std::wstring cancelEventName;
   HFONT uiFont = nullptr;
@@ -262,6 +264,29 @@ const TargetFlags& CurrentTargetFlags() {
   return g_targetFlags;
 }
 
+void UpdateAdvancedMenu() {
+  if (g_app.advancedMenu == nullptr) {
+    return;
+  }
+  CheckMenuItem(g_app.advancedMenu, IDM_ADV_DATA_SECTIONS,
+                MF_BYCOMMAND | (g_app.createDataSections ? MF_CHECKED
+                                                         : MF_UNCHECKED));
+  CheckMenuItem(g_app.advancedMenu, IDM_ADV_NO_SCYLLA,
+                MF_BYCOMMAND | (g_app.disableScylla ? MF_CHECKED
+                                                    : MF_UNCHECKED));
+  CheckMenuItem(g_app.advancedMenu, IDM_ADV_FIX_RELOCS,
+                MF_BYCOMMAND | (g_app.fixRelocations ? MF_CHECKED
+                                                     : MF_UNCHECKED));
+}
+
+void EnableAdvancedItem(HMENU menu, UINT id, bool enabled) {
+  if (menu == nullptr) {
+    return;
+  }
+  EnableMenuItem(menu, id,
+                 MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED));
+}
+
 void UpdateCommandUi() {
   const int selection = SelectedCommand();
   const bool unpack = selection == static_cast<int>(Command::Unpack);
@@ -272,9 +297,14 @@ void UpdateCommandUi() {
   const bool dllTarget = (unpack || shrink) && target.isDll;
   const bool canCreateData = target.machine == IMAGE_FILE_MACHINE_I386;
 
-  EnableWindow(g_app.dataSections, enabled && unpack && canCreateData);
-  EnableWindow(g_app.noScylla, enabled && unpack);
-  EnableWindow(g_app.fixRelocs, enabled && dllTarget);
+  EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_DATA_SECTIONS,
+                     enabled && unpack && canCreateData);
+  EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_NO_SCYLLA,
+                     enabled && unpack);
+  EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_FIX_RELOCS,
+                     enabled && dllTarget);
+  UpdateAdvancedMenu();
+
   EnableWindow(g_app.pidLabel, enabled && dumpCode);
   EnableWindow(g_app.pid, enabled && dumpCode);
   EnableWindow(g_app.cancel, !enabled && g_app.cancelEvent != nullptr);
@@ -292,8 +322,9 @@ void SetRunning(bool running) {
   if (!running) {
     UpdateCommandUi();
   } else {
-    EnableWindow(g_app.dataSections, FALSE);
-    EnableWindow(g_app.noScylla, FALSE);
+    EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_DATA_SECTIONS, false);
+    EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_NO_SCYLLA, false);
+    EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_FIX_RELOCS, false);
     EnableWindow(g_app.pidLabel, FALSE);
     EnableWindow(g_app.pid, FALSE);
   }
@@ -345,12 +376,9 @@ bool ReadJob(Job* job, std::wstring* error) {
 
   job->command = static_cast<Command>(selection);
   job->target = GetText(g_app.target);
-  job->createDataSections =
-      SendMessageW(g_app.dataSections, BM_GETCHECK, 0, 0) == BST_CHECKED;
-  job->useScyllaHide =
-      SendMessageW(g_app.noScylla, BM_GETCHECK, 0, 0) != BST_CHECKED;
-  job->fixRelocations =
-      SendMessageW(g_app.fixRelocs, BM_GETCHECK, 0, 0) == BST_CHECKED;
+  job->createDataSections = g_app.createDataSections;
+  job->useScyllaHide = !g_app.disableScylla;
+  job->fixRelocations = g_app.fixRelocations;
   job->pid = 0;
 
   if (job->target.empty()) {
@@ -363,11 +391,15 @@ bool ReadJob(Job* job, std::wstring* error) {
   }
   if (job->fixRelocations && !CurrentTargetFlags().isDll) {
     job->fixRelocations = false;
+    g_app.fixRelocations = false;
+    UpdateAdvancedMenu();
   }
   if (job->createDataSections &&
       CurrentTargetFlags().machine != IMAGE_FILE_MACHINE_I386) {
     // MkData only exists in the 32-bit build; the 64-bit debugger ignores it.
     job->createDataSections = false;
+    g_app.createDataSections = false;
+    UpdateAdvancedMenu();
   }
 
   return true;
@@ -835,15 +867,6 @@ void CreateControls(HWND hwnd) {
   g_app.command = CreateChild(L"COMBOBOX", L"",
                               CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
                               IDC_COMMAND);
-  g_app.dataSections = CreateChild(L"BUTTON", L"Create data sections",
-                                   BS_AUTOCHECKBOX | WS_TABSTOP, 0,
-                                   IDC_DATA_SECTIONS);
-  g_app.noScylla = CreateChild(L"BUTTON", L"Disable ScyllaHide",
-                               BS_AUTOCHECKBOX | WS_TABSTOP, 0,
-                               IDC_NO_SCYLLA);
-  g_app.fixRelocs = CreateChild(L"BUTTON", L"Fix DLL relocations",
-                                BS_AUTOCHECKBOX | WS_TABSTOP, 0,
-                                IDC_FIX_RELOCS);
   g_app.pidLabel =
       CreateChild(L"STATIC", L"PID:", SS_LEFT, 0, IDC_PID_LABEL);
   g_app.pid = CreateChild(L"EDIT", L"0", ES_NUMBER | WS_TABSTOP,
@@ -896,8 +919,7 @@ void CreateControls(HWND hwnd) {
 
   const HWND normalFontControls[] = {
       g_app.targetLabel, g_app.target,      g_app.browse,
-      g_app.commandLabel, g_app.command,    g_app.dataSections,
-      g_app.noScylla,     g_app.fixRelocs,   g_app.pidLabel,   g_app.pid,
+      g_app.commandLabel, g_app.command,    g_app.pidLabel,   g_app.pid,
       g_app.start,        g_app.cancel,      g_app.status,
   };
   for (HWND control : normalFontControls) {
@@ -928,9 +950,6 @@ void Layout(HWND hwnd) {
   const int browseWidth = Dip(60);
   const int commandLabelWidth = Dip(52);
   const int commandWidth = Dip(140);
-  const int dataSectionsWidth = Dip(124);
-  const int noScyllaWidth = Dip(124);
-  const int fixRelocsWidth = Dip(124);
   const int pidLabelWidth = Dip(30);
   const int pidEditWidth = Dip(48);
   const int startWidth = Dip(72);
@@ -951,14 +970,7 @@ void Layout(HWND hwnd) {
              labelHeight, TRUE);
   x += commandLabelWidth + Dip(4);
   MoveWindow(g_app.command, x, y, commandWidth, Dip(160), TRUE);
-  x += commandWidth + Dip(6);
-  MoveWindow(g_app.dataSections, x, y + Dip(2), dataSectionsWidth,
-             labelHeight, TRUE);
-  x += dataSectionsWidth + Dip(6);
-  MoveWindow(g_app.noScylla, x, y + Dip(2), noScyllaWidth, labelHeight, TRUE);
-  x += noScyllaWidth + Dip(6);
-  MoveWindow(g_app.fixRelocs, x, y + Dip(2), fixRelocsWidth, labelHeight, TRUE);
-  x += fixRelocsWidth + Dip(8);
+  x += commandWidth + Dip(8);
   MoveWindow(g_app.pidLabel, x, y + Dip(2), pidLabelWidth, labelHeight, TRUE);
   x += pidLabelWidth + Dip(4);
   MoveWindow(g_app.pid, x, y, pidEditWidth, rowHeight, TRUE);
@@ -1142,6 +1154,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
           return 0;
         case IDM_ABOUT:
           ShowAbout();
+          return 0;
+        case IDM_ADV_DATA_SECTIONS:
+          g_app.createDataSections = !g_app.createDataSections;
+          UpdateAdvancedMenu();
+          return 0;
+        case IDM_ADV_NO_SCYLLA:
+          g_app.disableScylla = !g_app.disableScylla;
+          UpdateAdvancedMenu();
+          return 0;
+        case IDM_ADV_FIX_RELOCS:
+          g_app.fixRelocations = !g_app.fixRelocations;
+          UpdateAdvancedMenu();
           return 0;
         default:
           break;
@@ -1566,6 +1590,18 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
   AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(fileMenu, MF_STRING, IDM_EXIT, L"E&xit");
   AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"&File");
+
+  HMENU advancedMenu = CreatePopupMenu();
+  AppendMenuW(advancedMenu, MF_STRING, IDM_ADV_DATA_SECTIONS,
+              L"&Create data sections");
+  AppendMenuW(advancedMenu, MF_STRING, IDM_ADV_NO_SCYLLA,
+              L"&Disable ScyllaHide");
+  AppendMenuW(advancedMenu, MF_STRING, IDM_ADV_FIX_RELOCS,
+              L"&Fix DLL relocations");
+  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedMenu),
+              L"&Advanced");
+  g_app.menu = menu;
+  g_app.advancedMenu = advancedMenu;
 
   HMENU helpMenu = CreatePopupMenu();
   AppendMenuW(helpMenu, MF_STRING, IDM_ABOUT, L"&About");

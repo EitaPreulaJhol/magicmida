@@ -35,16 +35,17 @@ Then:
 
 - Select a target or drag one onto the window.
 - Pick the function from the drop-down list.
-- `Create data sections` and `Disable ScyllaHide` apply to Unpack.
-- `Fix DLL relocations` applies to Unpack and Shrink and is only enabled when
-  the target is a DLL. It rebuilds the `.reloc` section so the file can be
-  rebased. For Shrink, the `ImageBase` stored in the header is used as the dump
-  base.
+- The **Advanced** menu holds the unpack options. `Create data sections` and
+  `Disable ScyllaHide` apply to Unpack. `Fix DLL relocations` applies to
+  Unpack and Shrink and is only enabled when the target is a DLL. It rebuilds
+  the `.reloc` section so the file can be rebased. For Shrink, the `ImageBase`
+  stored in the header is used as the dump base.
 - `PID` is used by Dump code.
 - `Cancel` stops a running job. For 32-bit targets it also stops the worker;
   the target is terminated by the debugger cleanup.
 - The log pane shows all output with timestamps. The File menu holds Open,
-  Clear log, Save log (Ctrl+S), Copy log, and Exit.
+  Clear log, Save log (Ctrl+S), Copy log, and Exit; the Advanced menu holds
+  the unpack options.
 - After unpacking, a dump sanity check reports the entry point, section
   bounds, imports, and relocation directory in the log.
 
