@@ -159,9 +159,12 @@ void PEHeader::Sanitize() {
 
   if (!sections_.empty()) {
     ntHeaders.OptionalHeader.SizeOfHeaders = sections_[0].Header.PointerToRawData;
-    // Must have write access in the code section (in case .text and .data
-    // were merged).
+#if !defined(_WIN64)
+    // 32-bit packers sometimes merge .text/.data and clear WRITE from the
+    // header; keep the old workaround there. On x64 a forced W+X .text is a
+    // dump fingerprint, so preserve the original characteristics.
     sections_[0].Header.Characteristics |= IMAGE_SCN_MEM_WRITE;
+#endif
   }
 }
 
