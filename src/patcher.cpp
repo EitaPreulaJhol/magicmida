@@ -117,6 +117,7 @@ void Patcher::ShrinkPE() {
   };
 
   std::vector<int> deleted;
+  bool removedExecutable = false;
   MemoryStream newStream;
   newStream.CopyFrom(stream_, pe_->Sections()[0].Header.PointerToRawData);
 
@@ -141,7 +142,9 @@ void Patcher::ShrinkPE() {
 
     // Keep anything referenced by a data directory, the entry point, and the
     // runtime data that is not covered by a data directory (.CRT, .tls, .bss,
-    // .xdata/.pdata, CFG tables). Only protector leftovers should be removed.
+    // .xdata/.pdata, CFG tables). Only code/discardable leftovers should be
+    // removed: Themida often renames the app's data sections to spaces, so a
+    // name-only rule would delete .rdata/.data/.pdata and break the image.
     const bool protectedByName =
         name == ".data" || name == ".rdata" || name == ".xdata" ||
         name == ".CRT" || name == ".tls" || name == ".bss" ||
@@ -152,13 +155,23 @@ void Patcher::ShrinkPE() {
     const bool protectedByFlags =
         (header.Characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA) != 0;
     const bool noRawData = header.SizeOfRawData == 0;
-    const bool keep = i == 0 || isReferenced(header) ||
+    const bool executable =
+        (header.Characteristics & IMAGE_SCN_MEM_EXECUTE) != 0;
+    const bool discardable =
+        (header.Characteristics & IMAGE_SCN_MEM_DISCARDABLE) != 0;
+    const bool removable = executable || discardable;
+    const bool keep = !removable || i == 0 || isReferenced(header) ||
                       containsEntryPoint(header) || protectedByName ||
                       protectedByFlags || noRawData;
 
     if (!keep) {
-      LogF(ltInfo, "Removing section [%s] (VA %X, size %X)", name.c_str(),
-           header.VirtualAddress, header.Misc.VirtualSize);
+      LogF(executable ? ltWarning : ltInfo,
+           "Removing section [%s] (VA %X, size %X, flags %08X)", name.c_str(),
+           header.VirtualAddress, header.Misc.VirtualSize,
+           header.Characteristics);
+      if (executable) {
+        removedExecutable = true;
+      }
       deleted.push_back(i);
     } else {
       if (containsEntryPoint(header) && !isReferenced(header) &&
@@ -188,6 +201,13 @@ void Patcher::ShrinkPE() {
   std::reverse(deleted.begin(), deleted.end());
   for (int index : deleted) {
     pe_->DeleteSection(index);
+  }
+
+  if (removedExecutable) {
+    Log(ltWarning,
+        "Shrink removed executable section(s). If the target no longer "
+        "starts, restore the .bak and unvirtualize the target before "
+        "shrinking.");
   }
 }
 
