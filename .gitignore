@@ -12,6 +12,7 @@ Makefile
 # Editor/IDE files
 .vs/
 .vscode/
+plans/
 .idea/
 *.user
 *.suo
