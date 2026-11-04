@@ -108,10 +108,29 @@ The final distribution is `build/magicmida.exe`. The 32-bit worker lands in
 `build/worker/magicmida_worker.exe` and is not meant to be run by users. Both
 MinGW outputs are statically linked and need only the Windows system DLLs.
 
-`./build.sh` runs both steps in the right order. Add `--clean` for a clean
-rebuild.
+`./build.sh` runs both steps in the right order on Linux. Add `--clean` for a
+clean rebuild. On Windows, use `build.ps1` (see below).
 
 ### Building on Windows
+
+#### MinGW-w64 with PowerShell
+
+Install CMake, Ninja (or `mingw32-make`), and both MinGW-w64 toolchains
+(MSYS2: `mingw-w64-i686-gcc` and `mingw-w64-x86_64-gcc`). If the toolchains
+are not on PATH, point the script at their `bin` directories:
+
+```powershell
+.\build.ps1
+.\build.ps1 -Clean
+.\build.ps1 -MinGW32 C:\msys64\mingw32\bin -MinGW64 C:\msys64\mingw64\bin
+```
+
+If PowerShell blocks scripts, run
+`powershell -ExecutionPolicy Bypass -File .\build.ps1`. The script builds the
+32-bit worker first and embeds it into the 64-bit `build\magicmida.exe`; the
+worker lands in `build\worker\magicmida_worker.exe`.
+
+#### Visual Studio
 
 Visual Studio can embed a 32-bit worker that you build separately. Build that
 worker with MinGW-w64, since the bundled BeaEngine object is produced by GCC:
@@ -121,9 +140,6 @@ cmake -S . -B build/msvc -A x64 ^
   -DMAGICMIDA_32BIT_WORKER=C:\path\to\magicmida_worker.exe
 cmake --build build/msvc --config Release
 ```
-
-With MinGW-w64 on Windows, use the same commands as the Linux cross-build and
-leave out the toolchain files. On Linux, `./build.sh` is the simplest path.
 
 ### Dependencies
 
@@ -213,7 +229,8 @@ These limitations come from the original Magicmida:
 ## Project layout
 
 ```text
-build.sh              builds the worker and the final executable into build/
+build.sh              builds the worker and the final executable into build/ (Linux)
+build.ps1             same build for Windows/MinGW-w64 (PowerShell)
 src/
   gui_main.cpp        application entry point, Win32 GUI, and worker mode
   pe_report.*         human-readable PE info and target-machine detection
