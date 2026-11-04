@@ -42,6 +42,150 @@ const uint8_t* RemoteExportPointer(const std::vector<uint8_t>& buffer,
   return reinterpret_cast<const uint8_t*>(base + rva - directoryRva);
 }
 
+constexpr uint16_t kExpectedOptionalMagic =
+    sizeof(void*) == 8 ? 0x20B : 0x10B;
+
+// Rejects headers that were zeroed/truncated by an anti-dump. A plausible
+// header must have a section table that fits in the snapshot and sections
+// that fit in SizeOfImage.
+bool IsPlausiblePEHeader(const std::vector<uint8_t>& data) {
+  if (data.size() < 0x1000) {
+    return false;
+  }
+  const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(data.data());
+  if (dos->e_magic != IMAGE_DOS_SIGNATURE ||
+      dos->e_lfanew > 0xF00 ||
+      static_cast<size_t>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS) >
+          data.size()) {
+    return false;
+  }
+
+  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+      data.data() + dos->e_lfanew);
+  if (nt->Signature != IMAGE_NT_SIGNATURE ||
+      nt->OptionalHeader.Magic != kExpectedOptionalMagic) {
+    return false;
+  }
+
+  const uint16_t sectionCount = nt->FileHeader.NumberOfSections;
+  if (sectionCount == 0 || sectionCount > 96) {
+    return false;
+  }
+  const size_t sectionOffset =
+      static_cast<size_t>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS);
+  const size_t sectionBytes =
+      static_cast<size_t>(sectionCount) * sizeof(IMAGE_SECTION_HEADER);
+  if (sectionOffset + sectionBytes > data.size()) {
+    return false;
+  }
+
+  const uint64_t sizeOfImage = nt->OptionalHeader.SizeOfImage;
+  if (sizeOfImage == 0 || sizeOfImage > 0x40000000ull ||
+      nt->OptionalHeader.ImageBase == 0) {
+    return false;
+  }
+
+  const auto* sections = reinterpret_cast<const IMAGE_SECTION_HEADER*>(
+      data.data() + sectionOffset);
+  uint64_t maxEnd = 0;
+  bool anyContent = false;
+  for (uint16_t i = 0; i < sectionCount; ++i) {
+    const uint64_t start = sections[i].VirtualAddress;
+    const uint64_t end =
+        start + std::max<uint32_t>(sections[i].Misc.VirtualSize,
+                                   sections[i].SizeOfRawData);
+    maxEnd = std::max(maxEnd, end);
+    if (sections[i].Misc.VirtualSize != 0 ||
+        sections[i].SizeOfRawData != 0) {
+      anyContent = true;
+    }
+  }
+  if (!anyContent || maxEnd > sizeOfImage + 0x1000) {
+    return false;
+  }
+  return true;
+}
+
+void LogHeaderDiff(const std::vector<uint8_t>& live,
+                   const std::vector<uint8_t>& snapshot) {
+  if (live.size() < sizeof(IMAGE_DOS_HEADER) ||
+      snapshot.size() < sizeof(IMAGE_DOS_HEADER)) {
+    return;
+  }
+  const auto* liveDos =
+      reinterpret_cast<const IMAGE_DOS_HEADER*>(live.data());
+  const auto* snapDos =
+      reinterpret_cast<const IMAGE_DOS_HEADER*>(snapshot.data());
+  if (liveDos->e_lfanew != snapDos->e_lfanew) {
+    Log(ltInfo, "PE header: e_lfanew changed.");
+    return;
+  }
+  const size_t ntOffset = static_cast<size_t>(liveDos->e_lfanew);
+  if (ntOffset + sizeof(IMAGE_NT_HEADERS) > live.size() ||
+      ntOffset + sizeof(IMAGE_NT_HEADERS) > snapshot.size()) {
+    return;
+  }
+  const auto* liveNt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+      live.data() + ntOffset);
+  const auto* snapNt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+      snapshot.data() + ntOffset);
+  if (liveNt->Signature != IMAGE_NT_SIGNATURE ||
+      snapNt->Signature != IMAGE_NT_SIGNATURE) {
+    Log(ltInfo, "PE header: signature changed.");
+    return;
+  }
+
+  if (liveNt->FileHeader.NumberOfSections !=
+      snapNt->FileHeader.NumberOfSections) {
+    LogF(ltInfo, "PE header: NumberOfSections %u -> %u.",
+         snapNt->FileHeader.NumberOfSections,
+         liveNt->FileHeader.NumberOfSections);
+  }
+  if (liveNt->FileHeader.Characteristics !=
+      snapNt->FileHeader.Characteristics) {
+    LogF(ltInfo, "PE header: Characteristics %04X -> %04X.",
+         snapNt->FileHeader.Characteristics,
+         liveNt->FileHeader.Characteristics);
+  }
+  if (liveNt->OptionalHeader.AddressOfEntryPoint !=
+      snapNt->OptionalHeader.AddressOfEntryPoint) {
+    LogF(ltInfo, "PE header: AddressOfEntryPoint %X -> %X.",
+         snapNt->OptionalHeader.AddressOfEntryPoint,
+         liveNt->OptionalHeader.AddressOfEntryPoint);
+  }
+  if (liveNt->OptionalHeader.SizeOfImage !=
+      snapNt->OptionalHeader.SizeOfImage) {
+    LogF(ltInfo, "PE header: SizeOfImage %X -> %X.",
+         snapNt->OptionalHeader.SizeOfImage,
+         liveNt->OptionalHeader.SizeOfImage);
+  }
+  if (liveNt->OptionalHeader.ImageBase !=
+      snapNt->OptionalHeader.ImageBase) {
+    LogF(ltInfo, "PE header: ImageBase %llX -> %llX.",
+         static_cast<unsigned long long>(snapNt->OptionalHeader.ImageBase),
+         static_cast<unsigned long long>(liveNt->OptionalHeader.ImageBase));
+  }
+  if (liveNt->OptionalHeader.DllCharacteristics !=
+      snapNt->OptionalHeader.DllCharacteristics) {
+    LogF(ltInfo, "PE header: DllCharacteristics %04X -> %04X.",
+         snapNt->OptionalHeader.DllCharacteristics,
+         liveNt->OptionalHeader.DllCharacteristics);
+  }
+
+  const size_t sectionOffset = ntOffset + sizeof(IMAGE_NT_HEADERS);
+  const size_t sectionBytes = std::min<size_t>(
+      static_cast<size_t>(liveNt->FileHeader.NumberOfSections),
+      static_cast<size_t>(snapNt->FileHeader.NumberOfSections)) *
+      sizeof(IMAGE_SECTION_HEADER);
+  if (sectionBytes != 0 &&
+      (sectionOffset + sectionBytes > live.size() ||
+       sectionOffset + sectionBytes > snapshot.size() ||
+       std::memcmp(live.data() + sectionOffset,
+                   snapshot.data() + sectionOffset, sectionBytes) != 0)) {
+    Log(ltInfo, "PE header: section table changed.");
+  }
+}
+
 }  // namespace
 
 // --------------------------------------------------------------------------
@@ -68,6 +212,18 @@ Dumper::Dumper(const PROCESS_INFORMATION& process,
 #endif
 
   originalImports_ = GetOriginalImports(originalFile);
+
+  // Capture the header at the OEP, before import tracing/anti-dump fixes can
+  // modify it. Process() falls back to this snapshot when the live header
+  // looks corrupted.
+  headerSnapshot_.resize(0x1000);
+  if (!RPM(imageBase_, headerSnapshot_.data(), headerSnapshot_.size())) {
+    MakeMemoryReadable(imageBase_, headerSnapshot_.size());
+    if (!RPM(imageBase_, headerSnapshot_.data(), headerSnapshot_.size())) {
+      headerSnapshot_.clear();
+      Log(ltWarning, "Could not capture the PE header before tracing.");
+    }
+  }
 }
 
 Dumper::~Dumper() {
@@ -198,6 +354,25 @@ std::unique_ptr<PEHeader> Dumper::Process() {
   if (!RPM(imageBase_, sectionData.data(), sectionData.size())) {
     throw std::runtime_error("Dumper::Process: reading image header failed");
   }
+
+  if (!headerSnapshot_.empty() &&
+      headerSnapshot_.size() == sectionData.size() &&
+      std::memcmp(sectionData.data(), headerSnapshot_.data(),
+                  sectionData.size()) != 0) {
+    Log(ltWarning, "The PE header changed between OEP and dump.");
+    LogHeaderDiff(sectionData, headerSnapshot_);
+    const bool livePlausible = IsPlausiblePEHeader(sectionData);
+    const bool snapshotPlausible = IsPlausiblePEHeader(headerSnapshot_);
+    if (!livePlausible && snapshotPlausible) {
+      Log(ltWarning, "The live PE header looks corrupted; using the pre-trace snapshot.");
+      sectionData = headerSnapshot_;
+    } else if (livePlausible) {
+      Log(ltInfo, "The live PE header still looks valid; keeping it.");
+    } else {
+      Log(ltWarning, "Both PE headers look invalid; keeping the live one.");
+    }
+  }
+
   auto pe = std::make_unique<PEHeader>(sectionData.data(), sectionData.size());
   pe->Sanitize();
 

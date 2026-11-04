@@ -96,6 +96,7 @@ class Dumper {
   ForwardMap forwards_;
   std::vector<std::unique_ptr<RemoteModule>> allModules_;
   bool snapshotTaken_ = false;
+  std::vector<uint8_t> headerSnapshot_;
   std::vector<uint8_t> iatImage_;
   uint32_t iatImageSize_ = 0;
   std::vector<OriginalImport> originalImports_;
