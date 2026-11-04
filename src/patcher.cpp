@@ -331,7 +331,13 @@ void Patcher::FlattenLayout() {
   MemoryStream flatStream;
   flatStream.SetSize(static_cast<int64_t>(fileSize));
   const uint32_t firstVA = sections[0].Header.VirtualAddress;
-  const uint64_t headerCopy = std::min<uint64_t>(oldFileSize, firstVA);
+  const uint64_t oldSizeOfHeaders =
+      pe_->ntHeaders.OptionalHeader.SizeOfHeaders;
+  // Do not copy section bytes that happen to sit between SizeOfHeaders and
+  // the first section RVA in a normalized layout.
+  const uint64_t headerCopy =
+      std::min<uint64_t>(oldFileSize,
+                         std::min<uint64_t>(firstVA, oldSizeOfHeaders));
   if (headerCopy != 0) {
     std::memcpy(flatStream.Memory(), stream_.Memory(),
                 static_cast<size_t>(headerCopy));
