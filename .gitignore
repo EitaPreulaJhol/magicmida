@@ -33,3 +33,6 @@ plans/
 *.dmp
 .DS_Store
 Thumbs.db
+
+# Demo source video (the README uses docs/running.gif)
+docs/*.mp4

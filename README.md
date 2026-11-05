@@ -36,6 +36,13 @@ file, started hidden, and deleted when the job finishes.
 MkData and Dump code are rejected for 64-bit targets, matching the original
 64-bit build.
 
+## Demo
+
+![Magicmida unpacking a target](docs/running.gif)
+
+A short GUI demo covering target selection, unpacking and the dump sanity
+check.
+
 ## Using it
 
 Start `magicmida.exe`, then:
@@ -274,6 +281,7 @@ src/
   scyllahide.*        embedded ScyllaHide loading/mapping/deferred hooking
 vendor/beaengine/     prebuilt BeaEngine objects (from the original repo)
 vendor/scyllahide/    pinned ScyllaHide subset + local patches
+docs/                 demo GIF (and the ignored source MP4)
 cmake/                toolchain files, resource and worker-embedding helpers
 resources/            manifest and resource script
 tools/                helper scripts (ApiSet table generator, build helper)
