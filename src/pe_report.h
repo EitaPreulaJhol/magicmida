@@ -2,6 +2,7 @@
 // Human-readable PE information used by the GUI.
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 

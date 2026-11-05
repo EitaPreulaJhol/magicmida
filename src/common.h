@@ -27,12 +27,10 @@
 #include <string_view>
 #include <vector>
 
-// MinGW names the DEBUG_EVENT union ("u"), MSVC uses an anonymous union.
-#if defined(_MSC_VER)
-#define MM_EVENT_FIELD(event, field) ((event).field)
-#else
+// The Windows DEBUG_EVENT structure exposes its event payload through the
+// named union `u` in both the Windows SDK and MinGW headers. Older SDKs had
+// an anonymous union; the current SDK used by MSVC/VS 2026 does not.
 #define MM_EVENT_FIELD(event, field) ((event).u.field)
-#endif
 
 namespace magicmida {
 
