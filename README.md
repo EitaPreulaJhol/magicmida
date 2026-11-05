@@ -284,7 +284,7 @@ vendor/scyllahide/    pinned ScyllaHide subset + local patches
 docs/                 demo GIF (and the ignored source MP4)
 cmake/                toolchain files, resource and worker-embedding helpers
 resources/            manifest and resource script
-tools/                helper scripts (ApiSet table generator, build helper)
+tools/                helper scripts (ApiSet table generator)
 ```
 
 ## Credits
