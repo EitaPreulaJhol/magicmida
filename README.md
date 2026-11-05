@@ -58,10 +58,6 @@ Start `magicmida.exe`, then:
 - After unpacking, a dump sanity check reports the entry point, section
   bounds, imports, and relocation directory in the log.
 
-The window has a fixed size and uses classic Windows 2000 controls and fonts.
-It cannot be resized or maximized. Visual styles and the Common Controls v6
-dependency are disabled on purpose.
-
 The executable needs a 64-bit Windows host. The 32-bit worker is an internal
 build artifact and is not distributed as a standalone application.
 
@@ -93,7 +89,7 @@ for it. In batch files use `start /wait magicmida.exe ...` (or
 
 Magicmida targets Windows. It can be built natively on Windows with MinGW-w64
 or Visual Studio, or cross-compiled from Linux with MinGW-w64. The scripted
-MinGW-w64 build produces the single-file distribution.
+MinGW-w64 build produces the single-file executable.
 
 ### Cross-compiling on Linux with MinGW-w64
 
@@ -112,7 +108,7 @@ cmake -S . -B build/x64 \
 cmake --build build/x64 -j
 ```
 
-The final distribution is `build/magicmida.exe`. The 32-bit worker lands in
+The final distribution is `build/magicmida.exe`. The 32-bit worker goes to
 `build/worker/magicmida_worker.exe` and is not meant to be run by users. Both
 MinGW outputs are statically linked and need only the Windows system DLLs.
 
@@ -140,7 +136,7 @@ worker lands in `build\worker\magicmida_worker.exe`.
 
 #### Visual Studio
 
-Visual Studio can embed a 32-bit worker that you build separately. Build that
+Visual Studio can embed the 32-bit worker that you build separately. Build that
 worker with MinGW-w64, since the bundled BeaEngine object is produced by GCC:
 
 ```bat
@@ -149,10 +145,8 @@ cmake -S . -B build/msvc -A x64 ^
 cmake --build build/msvc --config Release
 ```
 
-### Dependencies
+### Dependencies (all vendored)
 
-* [Original Magicmida](https://github.com/Hendi48/Magicmida) (GPLv3). The
-  Delphi project this port is based on.
 * [BeaEngine 5.1](https://github.com/BeaEngine/beaengine) (LGPLv3). The two
   prebuilt object files in `vendor/beaengine/` come from the original
   Magicmida repository and are linked into the executable. The public header
@@ -176,8 +170,7 @@ into Magicmida:
 * `HookLibraryx64.dll` is embedded in the 64-bit executable.
 * `HookLibraryx86.dll` is embedded in the 32-bit worker.
 * Injection runs synchronously at the initial debug breakpoint.
-* Nothing has to be shipped or placed next to the executable: no
-  `InjectorCLI*.exe`, no `HookLibrary*.dll`, and no `scylla_hide.ini`.
+* Nothing has to be shipped or placed next to the executable.
 
 Set `MAGICMIDA_SCYLLA_DEBUG=1` to send ScyllaHide's debug messages and the
 active hook/PEB profile to the normal magicmida log. It does not write a
@@ -193,7 +186,8 @@ mandatory, exactly as in the original tool.
 
 ## Things to know about unpacked binaries
 
-These limitations come from the original Magicmida:
+These limitations come from the original Magicmida. I'm going to try to fix
+them (as much as possible):
 
 * Shrink is destructive. A `.bak` copy is written next to the target before
   it is modified. If the shrunk file no longer starts, restore the backup and
@@ -218,7 +212,7 @@ These limitations come from the original Magicmida:
   it (the DLL entry-point stub is written into that copy). The copy is removed
   after the run; a leftover from an interrupted session is deleted before the
   next DLL unpack.
-* Magicmida does not devirtualize VM bytecode. It detects a virtualized OEP
+* Magicmida does not devirtualize VM bytecode (yet). It detects a virtualized OEP
   (`jmp`/`call`, `push imm32; jmp`, `push imm32; push imm32; jmp`,
   `push imm; ret`, `mov reg, imm; jmp reg`) and, for 32-bit Themida V3,
   installs a PE-header anti-dump stub (also for `push imm32; jmp` entries).
@@ -243,8 +237,7 @@ These limitations come from the original Magicmida:
   image looks like a pointer), so verify the DLL after loading it at a
   different base. The option is available for Unpack and Shrink and is off by
   default.
-* Targets from 2007 to 2009 may not unpack on modern Windows. Windows XP may be
-  required.
+* Legacy PEs may not unpack on modern Windows. Windows XP may be required.
 * Do not enable compatibility mode for Magicmida or the target. Shimming breaks
   unpacking. Magicmida embeds a manifest to reduce automatic AppCompat patching,
   but stale AppCompat registry entries can still exist. If a target suddenly
@@ -290,12 +283,13 @@ tools/                helper scripts (ApiSet table generator, build helper)
 
 Original Magicmida: [Hendi48](https://github.com/Hendi48/Magicmida) and
 contributors. ScyllaHide: [x64dbg](https://github.com/x64dbg/ScyllaHide) and
-contributors. BeaEngine: the BeaEngine contributors. distorm: Gil Dabah.
+contributors. BeaEngine: the [BeaEngine](https://github.com/BeaEngine/beaengine) 
+contributors. distorm: [Gil Dabah](https://github.com/gdabah/distorm).
 
 ## License
 
 Magicmida is licensed under the GNU General Public License v3. See `LICENSE`.
-It is a C++ port of [Hendi48/Magicmida](https://github.com/Hendi48/Magicmida),
+This is a C++ port of [Hendi48/Magicmida](https://github.com/Hendi48/Magicmida),
 which is also GPLv3.
 
 The prebuilt BeaEngine object files are LGPLv3
