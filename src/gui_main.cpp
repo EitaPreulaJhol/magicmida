@@ -1153,7 +1153,9 @@ void SaveLog() {
 }
 
 void ShowAbout() {
-  std::wstring text = L"Magicmida\n\nScyllaHide ";
+  std::wstring text = L"Magicmida ";
+  text += Utf8ToWide(MAGICMIDA_VERSION);
+  text += L"\n\nScyllaHide ";
   text += Utf8ToWide(scyllahide::Version());
   text += L" (embedded)\n\nUnpacks Themida/WinLicense protected binaries.";
   MessageBoxW(g_app.hwnd, text.c_str(), L"About Magicmida",
@@ -1443,8 +1445,8 @@ void PrintUsage() {
 }
 
 void PrintVersion() {
-  CliWrite("Magicmida (ScyllaHide " + std::string(scyllahide::Version()) +
-           ")\n");
+  CliWrite("Magicmida " MAGICMIDA_VERSION " (ScyllaHide " +
+           std::string(scyllahide::Version()) + ")\n");
 }
 
 int RunCommandLine(int argumentCount, wchar_t** arguments) {
@@ -1731,8 +1733,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
 
   SetLog(GuiLogSink);
   SetStatusReporter(GuiStatusSink);
-  LogF(ltInfo, "Magicmida GUI ready. ScyllaHide %s embedded.",
-       scyllahide::Version());
+  LogF(ltInfo, "Magicmida %s GUI ready. ScyllaHide %s embedded.",
+       MAGICMIDA_VERSION, scyllahide::Version());
 
   ShowWindow(hwnd, showCommand);
   UpdateWindow(hwnd);

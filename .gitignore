@@ -25,3 +25,11 @@ plans/
 *.pdb
 *.ilk
 !vendor/beaengine/*.obj
+
+# Runtime artifacts and backups
+*.bak
+*.log
+*.tmp
+*.dmp
+.DS_Store
+Thumbs.db

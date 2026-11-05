@@ -53,11 +53,46 @@ jobs:
           test "$(x86_64-w64-mingw32-objdump -p "$x64" | grep -c 'DLL Name:')" -eq 1
           test "$(i686-w64-mingw32-objdump -p "$x86" | grep -c 'DLL Name:')" -eq 1
 
+      - name: Checksum
+        run: |
+          cd build
+          sha256sum magicmida.exe > magicmida.exe.sha256
+
       - uses: actions/upload-artifact@v4
         with:
           name: magicmida-x64
-          path: build/magicmida.exe
+          path: |
+            build/magicmida.exe
+            build/magicmida.exe.sha256
           if-no-files-found: error
+
+  smoke:
+    name: Windows smoke test
+    needs: mingw
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: magicmida-x64
+
+      - name: Verify checksum
+        shell: pwsh
+        run: |
+          $expected = (Get-Content magicmida.exe.sha256).Split()[0].ToLowerInvariant()
+          $actual = (Get-FileHash magicmida.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "SHA-256 mismatch: $actual != $expected"
+          }
+
+      - name: Run --version and --help
+        shell: pwsh
+        run: |
+          foreach ($arg in @('--version', '--help')) {
+            $p = Start-Process -FilePath .\magicmida.exe -ArgumentList $arg -Wait -PassThru -NoNewWindow
+            if ($p.ExitCode -ne 0) {
+              throw "magicmida $arg failed with exit code $($p.ExitCode)"
+            }
+          }
 
   # The MSVC job is a non-blocking compile check.  Building the single-file
   # distribution with MSVC would also require a 32-bit worker and the

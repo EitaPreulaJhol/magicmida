@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
-project(magicmida LANGUAGES C CXX RC)
+project(magicmida VERSION 1.0.0 LANGUAGES C CXX RC)
 
 if(NOT WIN32)
   message(FATAL_ERROR
-      "magicmida_new targets Windows only. Cross-compile with MinGW-w64 "
+      "Magicmida targets Windows only. Cross-compile with MinGW-w64 "
       "using one of the toolchain files in cmake/.")
 endif()
 
@@ -167,7 +167,8 @@ target_compile_definitions(magicmida_core PUBLIC
     _WIN32_WINNT=0x0601
     _CRT_SECURE_NO_WARNINGS
     SUPPORT_64BIT_OFFSET
-    DISTORM_LIGHT)
+    DISTORM_LIGHT
+    "MAGICMIDA_VERSION=\"${PROJECT_VERSION}\"")
 
 if(MSVC)
   target_compile_options(magicmida_core PRIVATE /W3)

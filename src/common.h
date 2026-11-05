@@ -9,6 +9,12 @@
 #define NOMINMAX
 #endif
 
+// Set by CMake from the project version. The fallback keeps standalone
+// builds/tests compiling.
+#ifndef MAGICMIDA_VERSION
+#define MAGICMIDA_VERSION "dev"
+#endif
+
 #include <windows.h>
 
 #include <cstdarg>
