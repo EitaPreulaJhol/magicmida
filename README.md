@@ -4,11 +4,19 @@ Magicmida unpacks Themida/WinLicense-protected applications for 32-bit and
 64-bit Windows. This repository is a C++ port of the original Delphi project,
 with a native Win32 GUI.
 
+Original project: <https://github.com/Hendi48/Magicmida> (GPLv3).
+
+> Use Magicmida only on binaries you own or are authorized to analyze. It is a
+> reverse-engineering tool for malware analysis and research, not a license or
+> DRM circumvention service.
+
 The unpacking logic comes from the Delphi sources: the debugger, breakpoint
 choreography, Themida version detection, IAT recovery, import reconstruction,
-dump fixups, anti-dump mitigation, shrink, and data-section restoration. All of
-it was ported one to one. The intentional differences are about portability and
-the user interface.
+dump fixups, anti-dump mitigation, shrink, and data-section restoration. The
+core logic was ported one to one. The C++ version also adds OEP PE-header
+snapshotting, final PE-layout normalization, and a few anti-dump/dump-quality
+fixes. The intentional differences are about portability, the user interface,
+and those post-processing steps.
 
 The distributed `magicmida.exe` is a 64-bit program that handles both target
 architectures. 64-bit targets are unpacked in-process. 32-bit targets go to a
@@ -83,8 +91,9 @@ for it. In batch files use `start /wait magicmida.exe ...` (or
 
 ## Building
 
-The project builds on Windows only. The scripted MinGW-w64 build produces the
-single-file distribution.
+Magicmida targets Windows. It can be built natively on Windows with MinGW-w64
+or Visual Studio, or cross-compiled from Linux with MinGW-w64. The scripted
+MinGW-w64 build produces the single-file distribution.
 
 ### Cross-compiling on Linux with MinGW-w64
 
@@ -142,13 +151,21 @@ cmake --build build/msvc --config Release
 
 ### Dependencies
 
+* [Original Magicmida](https://github.com/Hendi48/Magicmida) (GPLv3). The
+  Delphi project this port is based on.
 * [BeaEngine 5.1](https://github.com/BeaEngine/beaengine) (LGPLv3). The two
   prebuilt object files in `vendor/beaengine/` come from the original
-  Magicmida repository and are linked into the executable.
+  Magicmida repository and are linked into the executable. The public header
+  is mirrored in `src/disasm.h`; see `vendor/beaengine/README.md` and
+  `vendor/beaengine/LICENSE.LGPL` for the source-availability statement.
 * [ScyllaHide](https://github.com/x64dbg/ScyllaHide) (GPLv3). A pinned, patched
   subset is vendored in `vendor/scyllahide/`. Its injector and driver code is
   compiled into `magicmida.exe`, and the hook libraries are embedded as
-  resources. ScyllaHide needs no files at runtime.
+  resources. ScyllaHide needs no files at runtime. See
+  `vendor/scyllahide/LICENSE` and `vendor/scyllahide/UPSTREAM`.
+* [distorm](https://github.com/gdabah/distorm) (BSD 3-Clause for the decoder
+  sources; `decoder.h` carries a GPLv3 notice). The copy used by ScyllaHide
+  is vendored in `vendor/scyllahide/3rdparty/distorm/`.
 
 ## ScyllaHide
 
@@ -186,7 +203,17 @@ These limitations come from the original Magicmida:
   keeps that section and warns instead of breaking startup. When the
   exception table lives inside a removable protector section (`.themida`,
   `.boot`, `.vmp*`), Shrink copies it to a new `.pdata` section and drops the
-  protector's own entries before removing the section.
+  protector's own entries before removing the section. When `.themida`/`.boot`
+  are removed, the preceding data section's `VirtualSize` is extended over the
+  removed RVA range. Only its raw bytes are stored in the file; the loader
+  zero-fills the virtual tail. The file can therefore be much smaller than the
+  in-memory image, and the new `.pdata` adds a few KB.
+* Dumps are written in a compact, linker-like layout: `SizeOfHeaders` and the
+  section raw offsets/sizes are aligned, the stale checksum is zeroed, and
+  debug/COFF file offsets are remapped. A valid certificate table is preserved.
+  The PE header is captured at the OEP before tracing; if an anti-dump corrupts
+  it, the snapshot is used and the differences are logged. This covers header
+  corruption and dump fingerprints, not VM bytecode.
 * When unpacking a DLL, Magicmida temporarily creates `<name>MM.exe` next to
   it (the DLL entry-point stub is written into that copy). The copy is removed
   after the run; a leftover from an interrupted session is deleted before the
@@ -201,10 +228,12 @@ These limitations come from the original Magicmida:
 * VM anti-dumps are not fixed in general. If the entry point or other code is
   virtualized, the dump can be broken, or it may run only on the machine that
   produced it, since many anti-dumps rely on DLL base addresses. One specific
-  PE-header anti-dump is mitigated automatically for virtualized entry points.
-  The other variants are not. If the loader relocated the image, the dumper
-  rewrites the header `ImageBase` to the actual load address, so the dump is at
-  least internally consistent.
+  PE-header anti-dump is mitigated automatically for virtualized entry points;
+  the OEP header snapshot and layout normalization cover header corruption and
+  common dump fingerprints, but not VM-level anti-dumps. The other variants
+  are not fixed. If the loader relocated the image, the dumper rewrites the
+  header `ImageBase` to the actual load address, so the dump is at least
+  internally consistent.
 * Unpacked DLLs lose their relocation information. That can cause trouble when
   loading them into larger applications. The `Fix DLL relocations` option
   scans the dump for absolute pointers into the image and rebuilds a `.reloc`
@@ -229,6 +258,9 @@ These limitations come from the original Magicmida:
 ```text
 build.sh              builds the worker and the final executable into build/ (Linux)
 build.ps1             same build for Windows/MinGW-w64 (PowerShell)
+LICENSE               GPLv3 license
+THIRD_PARTY_NOTICES.md third-party licenses and attributions
+CHANGELOG.md          release notes
 src/
   gui_main.cpp        application entry point, Win32 GUI, and worker mode
   pe_report.*         human-readable PE info and target-machine detection
@@ -254,8 +286,20 @@ resources/            manifest and resource script
 tools/                helper scripts (ApiSet table generator, build helper)
 ```
 
+## Credits
+
+Original Magicmida: [Hendi48](https://github.com/Hendi48/Magicmida) and
+contributors. ScyllaHide: [x64dbg](https://github.com/x64dbg/ScyllaHide) and
+contributors. BeaEngine: the BeaEngine contributors. distorm: Gil Dabah.
+
 ## License
 
-Magicmida is licensed under the GPLv3, like the original project. The bundled
-BeaEngine object files and header are LGPLv3. The vendored ScyllaHide subset is
-GPLv3; see `vendor/scyllahide/LICENSE`.
+Magicmida is licensed under the GNU General Public License v3. See `LICENSE`.
+It is a C++ port of [Hendi48/Magicmida](https://github.com/Hendi48/Magicmida),
+which is also GPLv3.
+
+The prebuilt BeaEngine object files are LGPLv3
+(`vendor/beaengine/LICENSE.LGPL`), the vendored ScyllaHide subset is GPLv3
+(`vendor/scyllahide/LICENSE`), and the vendored distorm copy is BSD 3-Clause
+(plus a GPLv3 notice in `decoder.h`). See `THIRD_PARTY_NOTICES.md` for the full
+attribution and source-availability statements.
