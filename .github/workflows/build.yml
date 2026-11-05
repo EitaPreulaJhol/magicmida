@@ -94,9 +94,9 @@ jobs:
             }
           }
 
-  # The MSVC job is a non-blocking compile check.  Building the single-file
-  # distribution with MSVC would also require a 32-bit worker and the
-  # GCC-produced BeaEngine object; the MinGW job above produces the artifact.
+  # The MSVC job is a non-blocking compile check. The release artifact is
+  # built by the MinGW job; linking the app with the GCC-produced BeaEngine
+  # object is intentionally outside this check.
   msvc:
     name: MSVC x64 (compile check)
     runs-on: windows-latest
@@ -107,12 +107,17 @@ jobs:
       - name: Configure
         run: cmake -S . -B build/msvc -A x64
 
-      - name: Build
-        run: cmake --build build/msvc --config Release
+      - name: Build core and hook library
+        run: |
+          cmake --build build/msvc --config Release --target magicmida_core
+          cmake --build build/msvc --config Release --target magicmida_scylla_hook
 
-      - name: Verify output
+      - name: Verify hook library
         shell: pwsh
         run: |
-          if (-not (Test-Path build/magicmida.exe)) {
-            throw "build/magicmida.exe not found"
+          $hook = Get-ChildItem -Path build/msvc -Recurse -Filter HookLibraryx64.dll |
+              Select-Object -First 1
+          if ($null -eq $hook) {
+            throw "HookLibraryx64.dll not found"
           }
+          Write-Host "Hook library: $($hook.FullName)"
