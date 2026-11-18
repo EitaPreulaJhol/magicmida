@@ -62,7 +62,8 @@ void Patcher::NormalizeLayout() {
     throw std::runtime_error("NormalizeLayout: the PE has no sections");
   }
 
-  const uint32_t file_alignment = pe_->nt_headers_.OptionalHeader.FileAlignment;
+  const uint32_t file_alignment =
+      pe_->nt_headers().OptionalHeader.FileAlignment;
   if (file_alignment < 0x200 || file_alignment > 0x10000 ||
       (file_alignment & (file_alignment - 1)) != 0) {
     LogF(kLogWarning,
@@ -166,8 +167,8 @@ void Patcher::NormalizeLayout() {
 
   // File-offset fields in the headers/section table still point at the old
   // layout. Map them into the new one; data outside sections is dropped.
-  pe_->nt_headers_.FileHeader.PointerToSymbolTable =
-      map_file_offset(pe_->nt_headers_.FileHeader.PointerToSymbolTable);
+  pe_->nt_headers().FileHeader.PointerToSymbolTable =
+      map_file_offset(pe_->nt_headers().FileHeader.PointerToSymbolTable);
   for (PESection& section : pe_->Sections()) {
     if (section.header.PointerToRelocations != 0) {
       section.header.PointerToRelocations =
@@ -187,8 +188,8 @@ void Patcher::NormalizeLayout() {
   // offset. Preserve it and move its directory entry; the flat dump padding
   // (and protector bytes left behind by Shrink) is dropped.
   const IMAGE_DATA_DIRECTORY old_security =
-      pe_->nt_headers_.OptionalHeader
-          .DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY];
+      pe_->nt_headers()
+          .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY];
   uint64_t overlay_size = 0;
   uint64_t old_overlay_start = 0;
   if (old_security.VirtualAddress != 0 && old_security.Size != 0) {
@@ -215,8 +216,8 @@ void Patcher::NormalizeLayout() {
   }
 
   IMAGE_DATA_DIRECTORY& security =
-      pe_->nt_headers_.OptionalHeader
-          .DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY];
+      pe_->nt_headers()
+          .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY];
   if (overlay_size != 0) {
     security.VirtualAddress = static_cast<uint32_t>(new_overlay_start);
     // security.Size stays unchanged.
@@ -225,9 +226,9 @@ void Patcher::NormalizeLayout() {
     security.Size = 0;
   }
 
-  pe_->nt_headers_.OptionalHeader.SizeOfHeaders = new_headers;
+  pe_->nt_headers().OptionalHeader.SizeOfHeaders = new_headers;
   // The file changed, so the old header checksum is meaningless.
-  pe_->nt_headers_.OptionalHeader.CheckSum = 0;
+  pe_->nt_headers().OptionalHeader.CheckSum = 0;
 
   MemoryStream normalized;
   normalized.SetSize(static_cast<int64_t>(new_file_size));
@@ -251,8 +252,8 @@ void Patcher::NormalizeLayout() {
   // IMAGE_DEBUG_DIRECTORY entries hold file offsets (hint: the CodeView
   // record), so they must follow the section data they describe.
   const IMAGE_DATA_DIRECTORY debug_directory =
-      pe_->nt_headers_.OptionalHeader
-          .DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+      pe_->nt_headers()
+          .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
   if (debug_directory.VirtualAddress != 0 &&
       debug_directory.Size >= sizeof(IMAGE_DEBUG_DIRECTORY)) {
     const PESection* debug_section =
@@ -334,7 +335,7 @@ void Patcher::FlattenLayout() {
   flat_stream.SetSize(static_cast<int64_t>(file_size));
   const uint32_t first_va = sections[0].header.VirtualAddress;
   const uint64_t old_size_of_headers =
-      pe_->nt_headers_.OptionalHeader.SizeOfHeaders;
+      pe_->nt_headers().OptionalHeader.SizeOfHeaders;
   // Do not copy section bytes that happen to sit between SizeOfHeaders and
   // the first section RVA in a normalized layout.
   const uint64_t header_copy = std::min<uint64_t>(
@@ -362,7 +363,7 @@ void Patcher::FlattenLayout() {
     section.header.SizeOfRawData = old_size;
   }
 
-  pe_->nt_headers_.OptionalHeader.SizeOfHeaders = first_va;
+  pe_->nt_headers().OptionalHeader.SizeOfHeaders = first_va;
   pe_->SaveToStream(flat_stream);
   stream_ = std::move(flat_stream);
   Log(kLogInfo, "Flattened PE layout for data-section creation.");
@@ -381,7 +382,7 @@ bool Patcher::ProcessMkData() {
   if (pos_ms != std::string::npos && pos_ms > 0 &&
       PosFrom(lower, ".exe", pos_ms) < pos_ms + 10 + 10) {
     created = MapleCreateDataSections();
-  } else if (pe_->nt_headers_.OptionalHeader.MajorLinkerVersion == 14) {
+  } else if (pe_->nt_headers().OptionalHeader.MajorLinkerVersion == 14) {
     // MSVC 2015+
     created = MSVCCreateDataSections();
   } else {
@@ -408,8 +409,8 @@ void Patcher::RelocateExceptionTable() {
   }
 
   IMAGE_DATA_DIRECTORY* directory =
-      &pe_->nt_headers_.OptionalHeader
-           .DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+      &pe_->nt_headers()
+           .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
   if (directory->VirtualAddress == 0 || directory->Size < 12) {
     return;
   }
@@ -501,7 +502,7 @@ void Patcher::RelocateExceptionTable() {
   uint32_t raw_size = static_cast<uint32_t>(table.size());
   pe_->FileAlign(raw_size);
   if (raw_size == 0) {
-    raw_size = pe_->nt_headers_.OptionalHeader.FileAlignment;
+    raw_size = pe_->nt_headers().OptionalHeader.FileAlignment;
   }
 
   pe_->AddSectionToArray();
@@ -514,7 +515,7 @@ void Patcher::RelocateExceptionTable() {
   section.header.Characteristics =
       IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_INITIALIZED_DATA;
 
-  pe_->nt_headers_.FileHeader.NumberOfSections =
+  pe_->nt_headers().FileHeader.NumberOfSections =
       static_cast<WORD>(pe_->Sections().size());
   directory->VirtualAddress = virtual_address;
   directory->Size = static_cast<uint32_t>(table.size());
@@ -522,8 +523,8 @@ void Patcher::RelocateExceptionTable() {
   uint32_t size_of_image =
       virtual_address + static_cast<uint32_t>(table.size());
   pe_->SectionAlign(size_of_image);
-  if (size_of_image > pe_->nt_headers_.OptionalHeader.SizeOfImage) {
-    pe_->nt_headers_.OptionalHeader.SizeOfImage = size_of_image;
+  if (size_of_image > pe_->nt_headers().OptionalHeader.SizeOfImage) {
+    pe_->nt_headers().OptionalHeader.SizeOfImage = size_of_image;
   }
 
   if (static_cast<int64_t>(raw_offset) + raw_size > stream_.Size()) {
@@ -546,9 +547,9 @@ void Patcher::RelocateExceptionTable() {
 
 void Patcher::ShrinkPE() {
   const uint32_t entry_point =
-      pe_->nt_headers_.OptionalHeader.AddressOfEntryPoint;
+      pe_->nt_headers().OptionalHeader.AddressOfEntryPoint;
   const uint64_t image_base =
-      static_cast<uint64_t>(pe_->nt_headers_.OptionalHeader.ImageBase);
+      static_cast<uint64_t>(pe_->nt_headers().OptionalHeader.ImageBase);
 
   const auto is_referenced = [&](const IMAGE_SECTION_HEADER& header) {
     const uint64_t section_start = header.VirtualAddress;
@@ -562,7 +563,7 @@ void Patcher::ShrinkPE() {
         continue;
       }
       const IMAGE_DATA_DIRECTORY& directory =
-          pe_->nt_headers_.OptionalHeader.DataDirectory[index];
+          pe_->nt_headers().OptionalHeader.DataDirectory[index];
       if (directory.VirtualAddress == 0 || directory.Size == 0) {
         continue;
       }
@@ -813,8 +814,8 @@ void Patcher::ShrinkPE() {
 
 void Patcher::ShrinkExportSect() {
   IMAGE_DATA_DIRECTORY* directory =
-      &pe_->nt_headers_.OptionalHeader
-           .DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+      &pe_->nt_headers()
+           .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
   if (directory->VirtualAddress == 0 || directory->Size == 0) {
     return;
   }
@@ -917,7 +918,7 @@ bool Patcher::MapleCreateDataSections() {
   }
 
   if (data_start == 0) {
-    if (pe_->nt_headers_.OptionalHeader.MajorLinkerVersion == 6) {
+    if (pe_->nt_headers().OptionalHeader.MajorLinkerVersion == 6) {
       data_start = FindDataStartMSVC6();
       if (data_start == 0) {
         throw std::runtime_error("Data section not found");
@@ -1045,7 +1046,7 @@ bool Patcher::MapleCreateDataSections() {
       IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_CNT_INITIALIZED_DATA;
 
   // .rdata
-  const uintptr_t rdata_start = pe_->nt_headers_.OptionalHeader.BaseOfData;
+  const uintptr_t rdata_start = pe_->nt_headers().OptionalHeader.BaseOfData;
   const uintptr_t rdata_size = data_start - rdata_start;
   PESection& rdata_section = pe_->Sections()[1];
   rdata_section = PESection{};
@@ -1068,7 +1069,7 @@ bool Patcher::MapleCreateDataSections() {
     }
 
     const bool msvc2015 =
-        pe_->nt_headers_.OptionalHeader.MajorLinkerVersion >= 14;
+        pe_->nt_headers().OptionalHeader.MajorLinkerVersion >= 14;
     PESection& gfids_section = pe_->Sections()[3];
     gfids_section = PESection{};
     gfids_section.Rename(msvc2015 ? ".gfids" : ".vmp");
@@ -1080,12 +1081,12 @@ bool Patcher::MapleCreateDataSections() {
                                            IMAGE_SCN_MEM_WRITE |
                                            IMAGE_SCN_CNT_INITIALIZED_DATA;
 
-    pe_->nt_headers_.FileHeader.NumberOfSections += 3;
+    pe_->nt_headers().FileHeader.NumberOfSections += 3;
   } else {
-    if (pe_->nt_headers_.OptionalHeader.MajorLinkerVersion >= 14) {
+    if (pe_->nt_headers().OptionalHeader.MajorLinkerVersion >= 14) {
       Log(kLogFatal, ".gfids not found");
     }
-    pe_->nt_headers_.FileHeader.NumberOfSections += 2;
+    pe_->nt_headers().FileHeader.NumberOfSections += 2;
   }
 
   pe_->Sections()[0].header.Misc.VirtualSize -=
@@ -1120,7 +1121,7 @@ uintptr_t Patcher::FindDataStartMSVC6() {
   if ((result & 0xFFF) != 0) {
     result = 0;
   } else {
-    result -= pe_->nt_headers_.OptionalHeader.ImageBase;
+    result -= pe_->nt_headers().OptionalHeader.ImageBase;
   }
   return result;
 }
@@ -1165,7 +1166,7 @@ bool Patcher::FindDynTLSMSVC14(uintptr_t& dyn_tls_init) {
   }
 
   dyn_tls_init = *reinterpret_cast<const uint32_t*>(get_ptr_func + 1) -
-                 pe_->nt_headers_.OptionalHeader.ImageBase;
+                 pe_->nt_headers().OptionalHeader.ImageBase;
   uint8_t* dyn_tls_init_ptr = memory + dyn_tls_init;
 
   LogF(kLogInfo, "[MSVC] dyn_tls_init at %.8X",
@@ -1186,7 +1187,7 @@ bool Patcher::MSVCCreateDataSections() {
     return false;
   }
 
-  const uint32_t base_of_data = pe_->nt_headers_.OptionalHeader.BaseOfData;
+  const uint32_t base_of_data = pe_->nt_headers().OptionalHeader.BaseOfData;
   if (!(base_of_data > pe_->Sections()[0].header.VirtualAddress &&
         base_of_data < pe_->Sections()[0].header.VirtualAddress +
                            pe_->Sections()[0].header.Misc.VirtualSize &&
@@ -1223,7 +1224,7 @@ bool Patcher::MSVCCreateDataSections() {
       }
     }
 
-    pe_->nt_headers_.FileHeader.NumberOfSections += 2;
+    pe_->nt_headers().FileHeader.NumberOfSections += 2;
 
     // .data at [2]
     const uint32_t data_size =
@@ -1299,7 +1300,7 @@ void Patcher::DumpProcessCode(HANDLE process) {
       "Dumping process code is not available for 64-bit binaries.");
 #else
   uintptr_t image_base =
-      static_cast<uintptr_t>(pe_->nt_headers_.OptionalHeader.ImageBase);
+      static_cast<uintptr_t>(pe_->nt_headers().OptionalHeader.ImageBase);
 
   // The file's ImageBase is only a hint: the live process may have been
   // relocated (ASLR or an occupied base). Find the module by name and use its
@@ -1342,7 +1343,7 @@ void Patcher::DumpProcessCode(HANDLE process) {
   const uintptr_t start_address =
       image_base + pe_->Sections()[0].header.VirtualAddress;
   const uintptr_t end_address =
-      image_base + pe_->nt_headers_.OptionalHeader.BaseOfData;
+      image_base + pe_->nt_headers().OptionalHeader.BaseOfData;
   if (end_address <= start_address) {
     throw std::runtime_error("Invalid code range in the PE header.");
   }

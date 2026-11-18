@@ -72,15 +72,17 @@ class PEHeader {
   std::vector<PESection>& Sections() { return sections_; }
   const std::vector<PESection>& Sections() const { return sections_; }
 
+  IMAGE_NT_HEADERS& nt_headers() { return nt_headers_; }
+  const IMAGE_NT_HEADERS& nt_headers() const { return nt_headers_; }
+
   uint32_t LFANew() const { return lfa_new_; }
   uint32_t DumpSize() const { return dump_size_; }
   uint32_t SizeOfImage() const {
     return nt_headers_.OptionalHeader.SizeOfImage;
   }
 
-  IMAGE_NT_HEADERS nt_headers_{};
-
  private:
+  IMAGE_NT_HEADERS nt_headers_{};
   std::vector<PESection> sections_;
   uint32_t dump_size_ = 0;
   uint32_t lfa_new_ = 0;

@@ -551,7 +551,7 @@ void ThemidaDebugger64::FinishUnpacking(uintptr_t oep) {
 
   // Process the IAT into an import directory and dump the binary to disk.
   const std::wstring file_name = MakeUnpackedFileName(executable_);
-  dumper.iat_ = iat;
+  dumper.set_iat(iat);
   ReportStatus("Rebuilding imports");
   auto pe = dumper.Process();
   ReportStatus("Writing the dump");

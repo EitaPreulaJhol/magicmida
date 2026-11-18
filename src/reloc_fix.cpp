@@ -113,7 +113,7 @@ bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base) {
     return false;
   }
 
-  IMAGE_NT_HEADERS& nt = pe.nt_headers_;
+  IMAGE_NT_HEADERS& nt = pe.nt_headers();
   if ((nt.FileHeader.Characteristics & IMAGE_FILE_DLL) == 0) {
     Log(kLogWarning, "Relocation fix skipped: the file is not a DLL.");
     return false;

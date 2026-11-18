@@ -259,7 +259,7 @@ void Dumper::DumpToFile(const std::wstring& file_name, PEHeader& pe,
   size -= delta;
   file.Write(buffer.data(), size);
 
-  const size_t number_of_sections = pe.nt_headers_.FileHeader.NumberOfSections;
+  const size_t number_of_sections = pe.nt_headers().FileHeader.NumberOfSections;
   for (size_t i = number_of_sections; i < pe.Sections().size(); ++i) {
     const PESection& section = pe.Sections()[i];
     const uint32_t raw_size = section.header.SizeOfRawData;
@@ -273,35 +273,35 @@ void Dumper::DumpToFile(const std::wstring& file_name, PEHeader& pe,
     }
   }
 
-  pe.nt_headers_.FileHeader.NumberOfSections =
+  pe.nt_headers().FileHeader.NumberOfSections =
       static_cast<WORD>(pe.Sections().size());
-  pe.nt_headers_.OptionalHeader.AddressOfEntryPoint =
+  pe.nt_headers().OptionalHeader.AddressOfEntryPoint =
       static_cast<uint32_t>(oep_ - image_base_);
 
   if (is_dll) {
-    pe.nt_headers_.FileHeader.Characteristics |= IMAGE_FILE_DLL;
+    pe.nt_headers().FileHeader.Characteristics |= IMAGE_FILE_DLL;
     SwitchSxSManifestType(file, pe, 1, 2);  // Switch back
   }
 
-  if ((pe.nt_headers_.OptionalHeader.DllCharacteristics & 0x40) != 0) {
+  if ((pe.nt_headers().OptionalHeader.DllCharacteristics & 0x40) != 0) {
     Log(kLogInfo, "Executable is ASLR-aware - disabling the flag in the dump");
-    pe.nt_headers_.OptionalHeader.DllCharacteristics &= ~0x40;
+    pe.nt_headers().OptionalHeader.DllCharacteristics &= ~0x40;
   }
 
   // The dumped bytes were read from image_base_. If the loader relocated the
   // image, the in-memory header still reports the preferred base, and every
   // absolute address in the dump is relative to image_base_ instead. Keep the
   // header consistent with the contents.
-  if (static_cast<uintptr_t>(pe.nt_headers_.OptionalHeader.ImageBase) !=
+  if (static_cast<uintptr_t>(pe.nt_headers().OptionalHeader.ImageBase) !=
       image_base_) {
     LogF(kLogWarning,
          "Header image base %llX does not match the load address %llX; "
          "updating the dump header.",
          static_cast<unsigned long long>(
-             pe.nt_headers_.OptionalHeader.ImageBase),
+             pe.nt_headers().OptionalHeader.ImageBase),
          static_cast<unsigned long long>(image_base_));
-    pe.nt_headers_.OptionalHeader.ImageBase =
-        static_cast<decltype(pe.nt_headers_.OptionalHeader.ImageBase)>(
+    pe.nt_headers().OptionalHeader.ImageBase =
+        static_cast<decltype(pe.nt_headers().OptionalHeader.ImageBase)>(
             image_base_);
   }
 
@@ -404,7 +404,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
   LogF(kLogInfo, "Determined IAT size: %X", iat_size);
 
   auto& iat_directory =
-      pe->nt_headers_.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT];
+      pe->nt_headers().OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT];
   iat_directory.VirtualAddress = static_cast<uint32_t>(iat_ - image_base_);
   iat_directory.Size = iat_size + static_cast<uint32_t>(sizeof(void*));
 
@@ -664,7 +664,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     while (required > import_data.size()) {
       import_section->header.SizeOfRawData += 0x1000;
       import_section->header.Misc.VirtualSize += 0x1000;
-      pe->nt_headers_.OptionalHeader.SizeOfImage += 0x1000;
+      pe->nt_headers().OptionalHeader.SizeOfImage += 0x1000;
       import_data.resize(import_section->header.SizeOfRawData, 0);
     }
   };
@@ -722,7 +722,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
       if (strings_offset > import_data.size() - 0x100) {
         import_section->header.SizeOfRawData += 0x1000;
         import_section->header.Misc.VirtualSize += 0x1000;
-        pe->nt_headers_.OptionalHeader.SizeOfImage += 0x1000;
+        pe->nt_headers().OptionalHeader.SizeOfImage += 0x1000;
         import_data.resize(import_section->header.SizeOfRawData, 0);
       }
     }
@@ -730,8 +730,9 @@ std::unique_ptr<PEHeader> Dumper::Process() {
 
   import_section->data = std::move(import_data);
 
-  auto& import_directory = pe->nt_headers_.OptionalHeader
-                               .DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+  auto& import_directory =
+      pe->nt_headers()
+          .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
   import_directory.VirtualAddress = import_section->header.VirtualAddress;
   import_directory.Size =
       static_cast<uint32_t>(thunks.size() * sizeof(IMAGE_IMPORT_DESCRIPTOR));
@@ -995,8 +996,8 @@ void Dumper::MakeMemoryReadable(uintptr_t base, uintptr_t size) {
 void Dumper::SwitchSxSManifestType(Stream& stream, PEHeader& pe,
                                    int switch_from, int switch_to) {
   const auto& resource_directory =
-      pe.nt_headers_.OptionalHeader
-          .DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE];
+      pe.nt_headers()
+          .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE];
   if (resource_directory.VirtualAddress == 0) {
     return;
   }
@@ -1088,8 +1089,8 @@ std::vector<OriginalImport> Dumper::GetOriginalImports(
 
   PEHeader file_pe(header_buffer.data(), to_read);
   const IMAGE_DATA_DIRECTORY import_directory =
-      file_pe.nt_headers_.OptionalHeader
-          .DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+      file_pe.nt_headers()
+          .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
   if (import_directory.VirtualAddress == 0 || import_directory.Size == 0) {
     return result;
   }
@@ -1228,11 +1229,11 @@ void DumperDotnet::DumpToFile(const std::wstring& file_name) {
   pe.FileAlign(physical_size);
   uint32_t image_size = physical_size;
   pe.SectionAlign(image_size);
-  pe.nt_headers_.OptionalHeader.SizeOfImage = image_size;
+  pe.nt_headers().OptionalHeader.SizeOfImage = image_size;
   pe.Sections()[0].Rename(".text");
 
   LogF(kLogInfo, "Output has %d sections, determined size to be 0x%X",
-       pe.nt_headers_.FileHeader.NumberOfSections, size);
+       pe.nt_headers().FileHeader.NumberOfSections, size);
 
   uint32_t done = 0;
   while (done < size) {

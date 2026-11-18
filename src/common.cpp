@@ -14,9 +14,22 @@
 namespace magicmida {
 namespace {
 
-LogProc g_log;
-StatusProc g_statusReporter;
-HANDLE g_cancelEvent = nullptr;
+// Function-local pointers to heap objects that are intentionally never
+// destroyed: static objects with non-trivial destructors are not allowed.
+LogProc& LogSink() {
+  static LogProc* sink = new LogProc;
+  return *sink;
+}
+
+StatusProc& StatusSink() {
+  static StatusProc* sink = new StatusProc;
+  return *sink;
+}
+
+HANDLE& CancellationEvent() {
+  static HANDLE event = nullptr;
+  return event;
+}
 
 void DefaultLog(LogMsgType type, const std::string& msg) {
   const char* prefix = "[Info] ";
@@ -58,31 +71,31 @@ bool IsPathDelimiter(wchar_t c) {
 // --------------------------------------------------------------------------
 
 void SetLog(LogProc proc) {
-  g_log = std::move(proc);
+  LogSink() = std::move(proc);
 }
 
 void SetStatusReporter(StatusProc proc) {
-  g_statusReporter = std::move(proc);
+  StatusSink() = std::move(proc);
 }
 
 void ReportStatus(const std::string& text) {
-  if (g_statusReporter) {
-    g_statusReporter(text);
+  if (StatusSink()) {
+    StatusSink()(text);
   }
 }
 
 void SetCancellationEvent(HANDLE event) {
-  g_cancelEvent = event;
+  CancellationEvent() = event;
 }
 
 bool IsCancellationRequested() {
-  return g_cancelEvent != nullptr &&
-         WaitForSingleObject(g_cancelEvent, 0) == WAIT_OBJECT_0;
+  return CancellationEvent() != nullptr &&
+         WaitForSingleObject(CancellationEvent(), 0) == WAIT_OBJECT_0;
 }
 
 void Log(LogMsgType type, const std::string& msg) {
-  if (g_log) {
-    g_log(type, msg);
+  if (LogSink()) {
+    LogSink()(type, msg);
   } else {
     DefaultLog(type, msg);
   }

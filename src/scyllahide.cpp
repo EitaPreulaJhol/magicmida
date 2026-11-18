@@ -22,7 +22,8 @@
 
 // The ScyllaHide injector sources expect a global `scl::Logger g_log`.  We
 // never open a log file; callbacks are installed in Start() so messages go to
-// magicmida's log.
+// magicmida's log.  This is the one vendor-required exception to the rule
+// against static objects with non-trivial destructors.
 scl::Logger g_log;
 
 namespace magicmida {
@@ -45,7 +46,10 @@ struct Session {
   }
 };
 
-std::unique_ptr<Session> g_session;
+Session*& CurrentSession() {
+  static Session* session = nullptr;
+  return session;
+}
 
 void ScyllaLogInfo(const wchar_t* msg) {
   LogF(kLogInfo, "ScyllaHide: %s", WideToUtf8(msg).c_str());
@@ -270,7 +274,7 @@ const Profile& DefaultProfile() {
 
 bool Start(HANDLE process, DWORD process_id, const Profile& profile,
            std::string* error) {
-  static std::string ignored_error;
+  std::string ignored_error;
   if (error == nullptr) {
     error = &ignored_error;
   }
@@ -361,15 +365,16 @@ bool Start(HANDLE process, DWORD process_id, const Profile& profile,
 
   LogF(kLogGood, "ScyllaHide: hook library mapped at %p (pid %lu)",
        session->remote_base, process_id);
-  g_session = std::move(session);
+  CurrentSession() = session.release();
   return true;
 }
 
 void OnDllLoad(const std::wstring& file_name) {
-  if (!g_session) {
+  Session* session = CurrentSession();
+  if (session == nullptr) {
     return;
   }
-  if (g_session->hook_data.isUserDllHooked) {
+  if (session->hook_data.isUserDllHooked) {
     return;
   }
 
@@ -380,7 +385,7 @@ void OnDllLoad(const std::wstring& file_name) {
     return;
   }
 
-  if (ApplyUserHooks(*g_session)) {
+  if (ApplyUserHooks(*session)) {
     Log(kLogGood, "ScyllaHide: user32 hooks applied");
   } else if (is_user32) {
     Log(kLogWarning, "ScyllaHide: applying user32 hooks failed");
@@ -393,7 +398,8 @@ void OnDllLoad(const std::wstring& file_name) {
 }
 
 void Stop() {
-  g_session.reset();
+  delete CurrentSession();
+  CurrentSession() = nullptr;
 }
 
 }  // namespace scyllahide

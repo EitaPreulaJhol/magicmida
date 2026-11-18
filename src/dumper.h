@@ -65,8 +65,8 @@ class Dumper {
   static void SwitchSxSManifestType(Stream& stream, PEHeader& pe,
                                     int switch_from, int switch_to);
 
-  // Virtual address of the IAT in the target process.
-  uintptr_t iat_ = 0;
+  // Must be called with the virtual address of the IAT before Process().
+  void set_iat(uintptr_t iat) { iat_ = iat; }
 
  private:
   void GatherModuleExportsFromRemoteProcess(RemoteModule& module);
@@ -86,6 +86,7 @@ class Dumper {
   PROCESS_INFORMATION process_{};
   uintptr_t oep_ = 0;
   uintptr_t image_base_ = 0;
+  uintptr_t iat_ = 0;
   ForwardMap forwards_;
   std::vector<std::unique_ptr<RemoteModule>> all_modules_;
   bool snapshot_taken_ = false;

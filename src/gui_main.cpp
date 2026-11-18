@@ -98,11 +98,20 @@ struct AppState {
   bool running = false;
 };
 
-AppState g_app;
-int g_dpi = 96;
+// Function-local pointers to heap objects that are intentionally never
+// destroyed: static objects with non-trivial destructors are not allowed.
+AppState& App() {
+  static AppState* app = new AppState;
+  return *app;
+}
+
+int& DpiScale() {
+  static int dpi = 96;
+  return dpi;
+}
 
 int Dip(int value) {
-  return MulDiv(value, g_dpi, 96);
+  return MulDiv(value, DpiScale(), 96);
 }
 
 enum class Command {
@@ -151,8 +160,8 @@ void DisableVisualStyles() {
 }
 
 void SetStatus(const wchar_t* text) {
-  if (g_app.status != nullptr) {
-    SetWindowTextW(g_app.status, text);
+  if (App().status != nullptr) {
+    SetWindowTextW(App().status, text);
   }
 }
 
@@ -171,13 +180,13 @@ const char* LogPrefix(LogMsgType type) {
 }
 
 void AppendLog(LogMsgType type, const std::string& text) {
-  if (g_app.log == nullptr) {
+  if (App().log == nullptr) {
     return;
   }
 
-  int length = GetWindowTextLengthW(g_app.log);
+  int length = GetWindowTextLengthW(App().log);
   if (length > 2000000) {
-    SetWindowTextW(g_app.log, L"");
+    SetWindowTextW(App().log, L"");
     length = 0;
   }
 
@@ -191,31 +200,31 @@ void AppendLog(LogMsgType type, const std::string& text) {
                 "] " + LogPrefix(type) + text + "\r\n";
   const std::wstring wide = Utf8ToWide(line);
 
-  SendMessageW(g_app.log, EM_SETREADONLY, FALSE, 0);
-  SendMessageW(g_app.log, EM_SETSEL, static_cast<WPARAM>(length),
+  SendMessageW(App().log, EM_SETREADONLY, FALSE, 0);
+  SendMessageW(App().log, EM_SETSEL, static_cast<WPARAM>(length),
                static_cast<LPARAM>(length));
-  SendMessageW(g_app.log, EM_REPLACESEL, FALSE,
+  SendMessageW(App().log, EM_REPLACESEL, FALSE,
                reinterpret_cast<LPARAM>(wide.c_str()));
-  SendMessageW(g_app.log, EM_SETREADONLY, TRUE, 0);
-  SendMessageW(g_app.log, EM_SCROLLCARET, 0, 0);
+  SendMessageW(App().log, EM_SETREADONLY, TRUE, 0);
+  SendMessageW(App().log, EM_SCROLLCARET, 0, 0);
 }
 
 void GuiLogSink(LogMsgType type, const std::string& message) {
-  if (g_app.hwnd == nullptr) {
+  if (App().hwnd == nullptr) {
     return;
   }
   auto* entry = new LogEntry{type, message};
-  if (!PostMessageW(g_app.hwnd, kMsgLog, 0, reinterpret_cast<LPARAM>(entry))) {
+  if (!PostMessageW(App().hwnd, kMsgLog, 0, reinterpret_cast<LPARAM>(entry))) {
     delete entry;
   }
 }
 
 void GuiStatusSink(const std::string& text) {
-  if (g_app.hwnd == nullptr) {
+  if (App().hwnd == nullptr) {
     return;
   }
   auto* copy = new std::string(text);
-  if (!PostMessageW(g_app.hwnd, kMsgStatus, 0,
+  if (!PostMessageW(App().hwnd, kMsgStatus, 0,
                     reinterpret_cast<LPARAM>(copy))) {
     delete copy;
   }
@@ -223,12 +232,12 @@ void GuiStatusSink(const std::string& text) {
 
 int SelectedCommand() {
   const int selection =
-      static_cast<int>(SendMessageW(g_app.command, CB_GETCURSEL, 0, 0));
+      static_cast<int>(SendMessageW(App().command, CB_GETCURSEL, 0, 0));
   if (selection < 0) {
     return -1;
   }
   return static_cast<int>(
-      SendMessageW(g_app.command, CB_GETITEMDATA, selection, 0));
+      SendMessageW(App().command, CB_GETITEMDATA, selection, 0));
 }
 
 struct TargetFlags {
@@ -238,41 +247,48 @@ struct TargetFlags {
   bool valid = false;
 };
 
-TargetFlags g_targetFlags;
-std::wstring g_loggedTarget;
+TargetFlags& CachedTargetFlags() {
+  static TargetFlags* flags = new TargetFlags;
+  return *flags;
+}
+
+std::wstring& LoggedTarget() {
+  static std::wstring* target = new std::wstring;
+  return *target;
+}
 
 // Reads the target PE flags once per path. UpdateCommandUi is called for
 // every EN_CHANGE, so without the cache (and the debounce timer) a network
 // path could stall the UI.
 const TargetFlags& CurrentTargetFlags() {
-  const std::wstring target = GetText(g_app.target);
-  if (target == g_targetFlags.path) {
-    return g_targetFlags;
+  const std::wstring target = GetText(App().target);
+  if (target == CachedTargetFlags().path) {
+    return CachedTargetFlags();
   }
 
-  g_targetFlags = TargetFlags{};
-  g_targetFlags.path = target;
+  CachedTargetFlags() = TargetFlags{};
+  CachedTargetFlags().path = target;
   if (target.empty() || !FileExists(target)) {
-    return g_targetFlags;
+    return CachedTargetFlags();
   }
 
   try {
     const PEFlags flags = ReadPEFlags(target);
-    g_targetFlags.machine = flags.machine;
-    g_targetFlags.is_dll = flags.is_dll;
-    g_targetFlags.valid = true;
+    CachedTargetFlags().machine = flags.machine;
+    CachedTargetFlags().is_dll = flags.is_dll;
+    CachedTargetFlags().valid = true;
   } catch (...) {
   }
-  return g_targetFlags;
+  return CachedTargetFlags();
 }
 
 void MaybeLogTargetInfo() {
-  const std::wstring target = GetText(g_app.target);
+  const std::wstring target = GetText(App().target);
   if (target.empty()) {
-    g_loggedTarget.clear();
+    LoggedTarget().clear();
     return;
   }
-  if (target == g_loggedTarget) {
+  if (target == LoggedTarget()) {
     return;
   }
 
@@ -281,7 +297,7 @@ void MaybeLogTargetInfo() {
     return;
   }
 
-  g_loggedTarget = target;
+  LoggedTarget() = target;
   LogF(kLogGood, "Opened target: %s", WideToUtf8(target).c_str());
   try {
     EmitPEInfo(target, [](const std::string& line) { Log(kLogInfo, line); });
@@ -291,18 +307,18 @@ void MaybeLogTargetInfo() {
 }
 
 void UpdateAdvancedMenu() {
-  if (g_app.advanced_menu == nullptr) {
+  if (App().advanced_menu == nullptr) {
     return;
   }
   CheckMenuItem(
-      g_app.advanced_menu, kMenuAdvDataSections,
-      MF_BYCOMMAND | (g_app.create_data_sections ? MF_CHECKED : MF_UNCHECKED));
+      App().advanced_menu, kMenuAdvDataSections,
+      MF_BYCOMMAND | (App().create_data_sections ? MF_CHECKED : MF_UNCHECKED));
   CheckMenuItem(
-      g_app.advanced_menu, kMenuAdvNoScylla,
-      MF_BYCOMMAND | (g_app.disable_scylla ? MF_CHECKED : MF_UNCHECKED));
+      App().advanced_menu, kMenuAdvNoScylla,
+      MF_BYCOMMAND | (App().disable_scylla ? MF_CHECKED : MF_UNCHECKED));
   CheckMenuItem(
-      g_app.advanced_menu, kMenuAdvFixRelocs,
-      MF_BYCOMMAND | (g_app.fix_relocations ? MF_CHECKED : MF_UNCHECKED));
+      App().advanced_menu, kMenuAdvFixRelocs,
+      MF_BYCOMMAND | (App().fix_relocations ? MF_CHECKED : MF_UNCHECKED));
 }
 
 void EnableAdvancedItem(HMENU menu, UINT id, bool enabled) {
@@ -317,54 +333,54 @@ void UpdateCommandUi() {
   const bool unpack = selection == static_cast<int>(Command::kUnpack);
   const bool shrink = selection == static_cast<int>(Command::kShrink);
   const bool dump_code = selection == static_cast<int>(Command::kDumpCode);
-  const bool enabled = !g_app.running;
+  const bool enabled = !App().running;
   const TargetFlags& target = CurrentTargetFlags();
   const bool dll_target = (unpack || shrink) && target.is_dll;
   const bool can_create_data = target.machine == IMAGE_FILE_MACHINE_I386;
 
-  EnableAdvancedItem(g_app.advanced_menu, kMenuAdvDataSections,
+  EnableAdvancedItem(App().advanced_menu, kMenuAdvDataSections,
                      enabled && unpack && can_create_data);
-  EnableAdvancedItem(g_app.advanced_menu, kMenuAdvNoScylla, enabled && unpack);
-  EnableAdvancedItem(g_app.advanced_menu, kMenuAdvFixRelocs,
+  EnableAdvancedItem(App().advanced_menu, kMenuAdvNoScylla, enabled && unpack);
+  EnableAdvancedItem(App().advanced_menu, kMenuAdvFixRelocs,
                      enabled && dll_target);
   UpdateAdvancedMenu();
 
-  EnableWindow(g_app.pid_label, enabled && dump_code);
-  EnableWindow(g_app.pid, enabled && dump_code);
-  EnableWindow(g_app.cancel, !enabled && g_app.cancel_event != nullptr);
+  EnableWindow(App().pid_label, enabled && dump_code);
+  EnableWindow(App().pid, enabled && dump_code);
+  EnableWindow(App().cancel, !enabled && App().cancel_event != nullptr);
 
   MaybeLogTargetInfo();
 }
 
 void SetRunning(bool running) {
-  g_app.running = running;
+  App().running = running;
 
-  EnableWindow(g_app.target, !running);
-  EnableWindow(g_app.browse, !running);
-  EnableWindow(g_app.command, !running);
-  EnableWindow(g_app.start, !running);
-  EnableWindow(g_app.cancel, running && g_app.cancel_event != nullptr);
+  EnableWindow(App().target, !running);
+  EnableWindow(App().browse, !running);
+  EnableWindow(App().command, !running);
+  EnableWindow(App().start, !running);
+  EnableWindow(App().cancel, running && App().cancel_event != nullptr);
 
   if (!running) {
     UpdateCommandUi();
   } else {
-    EnableAdvancedItem(g_app.advanced_menu, kMenuAdvDataSections, false);
-    EnableAdvancedItem(g_app.advanced_menu, kMenuAdvNoScylla, false);
-    EnableAdvancedItem(g_app.advanced_menu, kMenuAdvFixRelocs, false);
-    EnableWindow(g_app.pid_label, FALSE);
-    EnableWindow(g_app.pid, FALSE);
+    EnableAdvancedItem(App().advanced_menu, kMenuAdvDataSections, false);
+    EnableAdvancedItem(App().advanced_menu, kMenuAdvNoScylla, false);
+    EnableAdvancedItem(App().advanced_menu, kMenuAdvFixRelocs, false);
+    EnableWindow(App().pid_label, FALSE);
+    EnableWindow(App().pid, FALSE);
   }
 }
 
 void BrowseForTarget() {
-  if (g_app.running) {
+  if (App().running) {
     return;
   }
 
   wchar_t file[32768]{};
   OPENFILENAMEW dialog{};
   dialog.lStructSize = sizeof(dialog);
-  dialog.hwndOwner = g_app.hwnd;
+  dialog.hwndOwner = App().hwnd;
   dialog.lpstrFilter =
       L"Executables (*.exe;*.dll)\0*.exe;*.dll\0All files (*.*)\0*.*\0";
   dialog.lpstrFile = file;
@@ -373,8 +389,8 @@ void BrowseForTarget() {
   dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
 
   if (GetOpenFileNameW(&dialog)) {
-    g_loggedTarget.clear();
-    SetWindowTextW(g_app.target, file);
+    LoggedTarget().clear();
+    SetWindowTextW(App().target, file);
     UpdateCommandUi();
   }
 }
@@ -403,10 +419,10 @@ bool ReadJob(Job* job, std::wstring* error) {
   }
 
   job->command = static_cast<Command>(selection);
-  job->target = GetText(g_app.target);
-  job->create_data_sections = g_app.create_data_sections;
-  job->use_scylla_hide = !g_app.disable_scylla;
-  job->fix_relocations = g_app.fix_relocations;
+  job->target = GetText(App().target);
+  job->create_data_sections = App().create_data_sections;
+  job->use_scylla_hide = !App().disable_scylla;
+  job->fix_relocations = App().fix_relocations;
   job->pid = 0;
 
   if (job->target.empty()) {
@@ -419,14 +435,14 @@ bool ReadJob(Job* job, std::wstring* error) {
   }
   if (job->fix_relocations && !CurrentTargetFlags().is_dll) {
     job->fix_relocations = false;
-    g_app.fix_relocations = false;
+    App().fix_relocations = false;
     UpdateAdvancedMenu();
   }
   if (job->create_data_sections &&
       CurrentTargetFlags().machine != IMAGE_FILE_MACHINE_I386) {
     // MkData only exists in the 32-bit build; the 64-bit debugger ignores it.
     job->create_data_sections = false;
-    g_app.create_data_sections = false;
+    App().create_data_sections = false;
     UpdateAdvancedMenu();
   }
 
@@ -544,7 +560,7 @@ bool RunWorkerJob(const Job& job) {
       (job.create_data_sections ? L"1" : L"0") + L" " +
       (job.use_scylla_hide ? L"1" : L"0") + L" " +
       (job.fix_relocations ? L"1" : L"0") + L" \"" +
-      (g_app.cancel_event_name.empty() ? L"-" : g_app.cancel_event_name) +
+      (App().cancel_event_name.empty() ? L"-" : App().cancel_event_name) +
       L"\" \"" + job.target + L"\"";
 
   PROCESS_INFORMATION process{};
@@ -656,8 +672,8 @@ void NormalizeOutputLayout(const std::wstring& file_name) {
 }
 
 bool ExecuteJob(const Job& job) {
-  if (g_app.cancel_event != nullptr) {
-    SetCancellationEvent(g_app.cancel_event);
+  if (App().cancel_event != nullptr) {
+    SetCancellationEvent(App().cancel_event);
   }
 
   if (job.command == Command::kUnpack && !PrepareOutputFile(job.target)) {
@@ -772,8 +788,8 @@ DWORD WINAPI RunJobThread(LPVOID parameter) {
   Job* job = static_cast<Job*>(parameter);
   const bool success = ExecuteJob(*job);
   delete job;
-  if (g_app.hwnd != nullptr) {
-    PostMessageW(g_app.hwnd, kMsgDone, success ? 1 : 0, 0);
+  if (App().hwnd != nullptr) {
+    PostMessageW(App().hwnd, kMsgDone, success ? 1 : 0, 0);
   }
   return 0;
 }
@@ -814,21 +830,21 @@ bool ResolveJob(Job* job, uint16_t* machine, std::wstring* error) {
 }
 
 void StartJob() {
-  if (g_app.running) {
+  if (App().running) {
     return;
   }
 
   Job job;
   std::wstring error;
   if (!ReadJob(&job, &error)) {
-    MessageBoxW(g_app.hwnd, error.c_str(), kWindowTitle,
+    MessageBoxW(App().hwnd, error.c_str(), kWindowTitle,
                 MB_OK | MB_ICONWARNING);
     return;
   }
 
   uint16_t machine = 0;
   if (!ResolveJob(&job, &machine, &error)) {
-    MessageBoxW(g_app.hwnd, error.c_str(), kWindowTitle,
+    MessageBoxW(App().hwnd, error.c_str(), kWindowTitle,
                 MB_OK | MB_ICONWARNING);
     return;
   }
@@ -836,11 +852,11 @@ void StartJob() {
   MaybeLogTargetInfo();
 
   if (job.command == Command::kDumpCode) {
-    const std::wstring text = GetText(g_app.pid);
+    const std::wstring text = GetText(App().pid);
     wchar_t* end = nullptr;
     const unsigned long value = wcstoul(text.c_str(), &end, 10);
     if (value == 0 || end == text.c_str() || *end != L'\0') {
-      MessageBoxW(g_app.hwnd, L"Enter a valid process ID.", kWindowTitle,
+      MessageBoxW(App().hwnd, L"Enter a valid process ID.", kWindowTitle,
                   MB_OK | MB_ICONWARNING);
       return;
     }
@@ -852,7 +868,7 @@ void StartJob() {
     if (FileExists(output)) {
       const std::wstring text = L"The output file already exists:\n\n" +
                                 output + L"\n\nOverwrite it?";
-      if (MessageBoxW(g_app.hwnd, text.c_str(), kWindowTitle,
+      if (MessageBoxW(App().hwnd, text.c_str(), kWindowTitle,
                       MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
         return;
       }
@@ -860,20 +876,20 @@ void StartJob() {
   }
 
   static unsigned int cancel_counter = 0;
-  if (g_app.cancel_event != nullptr) {
-    CloseHandle(g_app.cancel_event);
-    g_app.cancel_event = nullptr;
+  if (App().cancel_event != nullptr) {
+    CloseHandle(App().cancel_event);
+    App().cancel_event = nullptr;
   }
-  g_app.cancel_event_name = L"Local\\MagicmidaCancel-" +
+  App().cancel_event_name = L"Local\\MagicmidaCancel-" +
                             std::to_wstring(GetCurrentProcessId()) + L"-" +
                             std::to_wstring(GetTickCount64()) + L"-" +
                             std::to_wstring(++cancel_counter);
-  g_app.cancel_event =
-      CreateEventW(nullptr, TRUE, FALSE, g_app.cancel_event_name.c_str());
-  if (g_app.cancel_event == nullptr) {
+  App().cancel_event =
+      CreateEventW(nullptr, TRUE, FALSE, App().cancel_event_name.c_str());
+  if (App().cancel_event == nullptr) {
     LogF(kLogWarning, "Could not create the cancellation event (error %lu).",
          GetLastError());
-    g_app.cancel_event_name.clear();
+    App().cancel_event_name.clear();
   }
 
   PEFlags flags;
@@ -898,11 +914,11 @@ void StartJob() {
       CreateThread(nullptr, 0, RunJobThread, thread_job, 0, nullptr);
   if (thread == nullptr) {
     delete thread_job;
-    if (g_app.cancel_event != nullptr) {
-      CloseHandle(g_app.cancel_event);
-      g_app.cancel_event = nullptr;
+    if (App().cancel_event != nullptr) {
+      CloseHandle(App().cancel_event);
+      App().cancel_event = nullptr;
     }
-    g_app.cancel_event_name.clear();
+    App().cancel_event_name.clear();
     SetCancellationEvent(nullptr);
     SetRunning(false);
     SetStatus(L"Failed to start.");
@@ -910,48 +926,48 @@ void StartJob() {
          GetLastError());
     return;
   }
-  g_app.worker = thread;
+  App().worker = thread;
 }
 
 HWND CreateChild(const wchar_t* class_name, const wchar_t* text, DWORD style,
                  DWORD ex_style, int id) {
   return CreateWindowExW(ex_style, class_name, text,
-                         WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, g_app.hwnd,
+                         WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, App().hwnd,
                          reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
-                         g_app.instance, nullptr);
+                         App().instance, nullptr);
 }
 
 void CreateControls(HWND hwnd) {
-  g_app.hwnd = hwnd;
-  g_app.target_label =
+  App().hwnd = hwnd;
+  App().target_label =
       CreateChild(L"STATIC", L"Target:", SS_LEFT, 0, kTargetLabel);
-  g_app.target = CreateChild(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP,
+  App().target = CreateChild(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP,
                              WS_EX_CLIENTEDGE, kTarget);
-  g_app.browse = CreateChild(L"BUTTON", L"Browse...",
+  App().browse = CreateChild(L"BUTTON", L"Browse...",
                              BS_PUSHBUTTON | WS_TABSTOP, 0, kBrowse);
-  g_app.command_label =
+  App().command_label =
       CreateChild(L"STATIC", L"Action:", SS_LEFT, 0, kCommandLabel);
-  g_app.command =
+  App().command =
       CreateChild(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
                   0, kCommand);
-  g_app.pid_label = CreateChild(L"STATIC", L"PID:", SS_LEFT, 0, kPidLabel);
-  g_app.pid = CreateChild(L"EDIT", L"0", ES_NUMBER | WS_TABSTOP,
+  App().pid_label = CreateChild(L"STATIC", L"PID:", SS_LEFT, 0, kPidLabel);
+  App().pid = CreateChild(L"EDIT", L"0", ES_NUMBER | WS_TABSTOP,
                           WS_EX_CLIENTEDGE, kPid);
-  g_app.start = CreateChild(L"BUTTON", L"Start", BS_DEFPUSHBUTTON | WS_TABSTOP,
+  App().start = CreateChild(L"BUTTON", L"Start", BS_DEFPUSHBUTTON | WS_TABSTOP,
                             0, kStart);
-  g_app.cancel =
+  App().cancel =
       CreateChild(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 0, kCancel);
-  g_app.log = CreateChild(
+  App().log = CreateChild(
       L"EDIT", L"", WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
       WS_EX_CLIENTEDGE, kLog);
-  g_app.status = CreateChild(L"STATIC", L"Ready.",
+  App().status = CreateChild(L"STATIC", L"Ready.",
                              SS_LEFT | SS_SUNKEN | SS_CENTERIMAGE, 0, kStatus);
 
   const auto add_command = [](Command command, const wchar_t* text) {
-    const LRESULT index = SendMessageW(g_app.command, CB_ADDSTRING, 0,
+    const LRESULT index = SendMessageW(App().command, CB_ADDSTRING, 0,
                                        reinterpret_cast<LPARAM>(text));
     if (index != CB_ERR) {
-      SendMessageW(g_app.command, CB_SETITEMDATA, static_cast<WPARAM>(index),
+      SendMessageW(App().command, CB_SETITEMDATA, static_cast<WPARAM>(index),
                    static_cast<LPARAM>(command));
     }
   };
@@ -959,36 +975,36 @@ void CreateControls(HWND hwnd) {
   add_command(Command::kShrink, L"Shrink");
   add_command(Command::kMkData, L"Make data sections");
   add_command(Command::kDumpCode, L"Dump code");
-  SendMessageW(g_app.command, CB_SETCURSEL, 0, 0);
+  SendMessageW(App().command, CB_SETCURSEL, 0, 0);
 
   // Windows 2000-style UI font.  MS Sans Serif is the classic Win32 dialog
   // font; scaling keeps it readable on high-DPI displays.
-  g_app.ui_font = CreateFontW(-MulDiv(8, g_dpi, 72), 0, 0, 0, FW_NORMAL, FALSE,
-                              FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                              CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
-                              DEFAULT_PITCH | FF_SWISS, L"MS Sans Serif");
-  if (g_app.ui_font == nullptr) {
-    g_app.ui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+  App().ui_font = CreateFontW(
+      -MulDiv(8, DpiScale(), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+      DEFAULT_PITCH | FF_SWISS, L"MS Sans Serif");
+  if (App().ui_font == nullptr) {
+    App().ui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
   }
 
-  g_app.log_font = CreateFontW(
-      -MulDiv(9, g_dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+  App().log_font = CreateFontW(
+      -MulDiv(9, DpiScale(), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
       FIXED_PITCH | FF_MODERN, L"Courier New");
-  if (g_app.log_font == nullptr) {
-    g_app.log_font = g_app.ui_font;
+  if (App().log_font == nullptr) {
+    App().log_font = App().ui_font;
   }
 
   const HWND normal_font_controls[] = {
-      g_app.target_label, g_app.target,    g_app.browse, g_app.command_label,
-      g_app.command,      g_app.pid_label, g_app.pid,    g_app.start,
-      g_app.cancel,       g_app.status,
+      App().target_label, App().target,    App().browse, App().command_label,
+      App().command,      App().pid_label, App().pid,    App().start,
+      App().cancel,       App().status,
   };
   for (HWND control : normal_font_controls) {
-    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_app.ui_font),
+    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(App().ui_font),
                  TRUE);
   }
-  SendMessageW(g_app.log, WM_SETFONT, reinterpret_cast<WPARAM>(g_app.log_font),
+  SendMessageW(App().log, WM_SETFONT, reinterpret_cast<WPARAM>(App().log_font),
                TRUE);
 
   DragAcceptFiles(hwnd, TRUE);
@@ -1018,64 +1034,64 @@ void Layout(HWND hwnd) {
   const int cancel_width = Dip(72);
 
   int y = margin;
-  MoveWindow(g_app.target_label, margin, y + Dip(2), target_label_width,
+  MoveWindow(App().target_label, margin, y + Dip(2), target_label_width,
              label_height, TRUE);
-  MoveWindow(g_app.target, margin + target_label_width + Dip(4), y,
+  MoveWindow(App().target, margin + target_label_width + Dip(4), y,
              width - target_label_width - Dip(4) - browse_width - Dip(6),
              row_height, TRUE);
-  MoveWindow(g_app.browse, margin + width - browse_width, y, browse_width,
+  MoveWindow(App().browse, margin + width - browse_width, y, browse_width,
              row_height, TRUE);
 
   y += row_height + gap;
   int x = margin;
-  MoveWindow(g_app.command_label, x, y + Dip(2), command_label_width,
+  MoveWindow(App().command_label, x, y + Dip(2), command_label_width,
              label_height, TRUE);
   x += command_label_width + Dip(4);
-  MoveWindow(g_app.command, x, y, command_width, Dip(160), TRUE);
+  MoveWindow(App().command, x, y, command_width, Dip(160), TRUE);
   x += command_width + Dip(8);
-  MoveWindow(g_app.pid_label, x, y + Dip(2), pid_label_width, label_height,
+  MoveWindow(App().pid_label, x, y + Dip(2), pid_label_width, label_height,
              TRUE);
   x += pid_label_width + Dip(4);
-  MoveWindow(g_app.pid, x, y, pid_edit_width, row_height, TRUE);
-  MoveWindow(g_app.cancel, margin + width - start_width - Dip(6) - cancel_width,
+  MoveWindow(App().pid, x, y, pid_edit_width, row_height, TRUE);
+  MoveWindow(App().cancel, margin + width - start_width - Dip(6) - cancel_width,
              y, cancel_width, row_height, TRUE);
-  MoveWindow(g_app.start, margin + width - start_width, y, start_width,
+  MoveWindow(App().start, margin + width - start_width, y, start_width,
              row_height, TRUE);
 
   y += row_height + gap;
   const int status_height = Dip(18);
   const int status_y = client.bottom - margin - status_height;
-  MoveWindow(g_app.status, margin, status_y, width, status_height, TRUE);
+  MoveWindow(App().status, margin, status_y, width, status_height, TRUE);
 
   int log_height = status_y - gap - y;
   if (log_height < Dip(80)) {
     log_height = Dip(80);
   }
-  MoveWindow(g_app.log, margin, y, width, log_height, TRUE);
+  MoveWindow(App().log, margin, y, width, log_height, TRUE);
 }
 
 void CopyLog() {
-  if (g_app.log == nullptr) {
+  if (App().log == nullptr) {
     return;
   }
 
   std::wstring text;
   DWORD start = 0;
   DWORD end = 0;
-  SendMessageW(g_app.log, EM_GETSEL, reinterpret_cast<WPARAM>(&start),
+  SendMessageW(App().log, EM_GETSEL, reinterpret_cast<WPARAM>(&start),
                reinterpret_cast<LPARAM>(&end));
   if (end > start) {
     text.resize(static_cast<size_t>(end - start) + 1);
-    const LRESULT copied = SendMessageW(g_app.log, EM_GETSELTEXT, 0,
+    const LRESULT copied = SendMessageW(App().log, EM_GETSELTEXT, 0,
                                         reinterpret_cast<LPARAM>(text.data()));
     text.resize(copied > 0 ? static_cast<size_t>(copied) : 0);
   } else {
-    const int length = GetWindowTextLengthW(g_app.log);
+    const int length = GetWindowTextLengthW(App().log);
     if (length <= 0) {
       return;
     }
     text.resize(static_cast<size_t>(length) + 1);
-    GetWindowTextW(g_app.log, text.data(), length + 1);
+    GetWindowTextW(App().log, text.data(), length + 1);
     text.resize(static_cast<size_t>(length));
   }
 
@@ -1083,7 +1099,7 @@ void CopyLog() {
     return;
   }
 
-  if (!OpenClipboard(g_app.hwnd)) {
+  if (!OpenClipboard(App().hwnd)) {
     return;
   }
   EmptyClipboard();
@@ -1106,14 +1122,14 @@ void CopyLog() {
 }
 
 void SaveLog() {
-  if (g_app.log == nullptr) {
+  if (App().log == nullptr) {
     return;
   }
 
   wchar_t file[MAX_PATH]{};
   OPENFILENAMEW dialog{};
   dialog.lStructSize = sizeof(dialog);
-  dialog.hwndOwner = g_app.hwnd;
+  dialog.hwndOwner = App().hwnd;
   dialog.lpstrFilter = L"Text files (*.txt)\0*.txt\0All files (*.*)\0*.*\0";
   dialog.lpstrFile = file;
   dialog.nMaxFile = static_cast<DWORD>(_countof(file));
@@ -1124,10 +1140,10 @@ void SaveLog() {
     return;
   }
 
-  const int length = GetWindowTextLengthW(g_app.log);
+  const int length = GetWindowTextLengthW(App().log);
   std::wstring text(static_cast<size_t>(length) + 1, L'\0');
   if (length > 0) {
-    GetWindowTextW(g_app.log, text.data(), length + 1);
+    GetWindowTextW(App().log, text.data(), length + 1);
   }
   text.resize(static_cast<size_t>(length));
 
@@ -1141,7 +1157,7 @@ void SaveLog() {
     }
     SetStatus(L"Log saved.");
   } catch (const std::exception& error) {
-    MessageBoxW(g_app.hwnd, Utf8ToWide(error.what()).c_str(), kWindowTitle,
+    MessageBoxW(App().hwnd, Utf8ToWide(error.what()).c_str(), kWindowTitle,
                 MB_OK | MB_ICONWARNING);
   }
 }
@@ -1152,7 +1168,7 @@ void ShowAbout() {
   text += L"\n\nScyllaHide ";
   text += Utf8ToWide(scyllahide::Version());
   text += L" (embedded)\n\nUnpacks Themida/WinLicense protected binaries.";
-  MessageBoxW(g_app.hwnd, text.c_str(), L"About Magicmida",
+  MessageBoxW(App().hwnd, text.c_str(), L"About Magicmida",
               MB_OK | MB_ICONINFORMATION);
 }
 
@@ -1186,9 +1202,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w_param,
           StartJob();
           return 0;
         case kCancel:
-          if (g_app.running && g_app.cancel_event != nullptr) {
-            SetEvent(g_app.cancel_event);
-            EnableWindow(g_app.cancel, FALSE);
+          if (App().running && App().cancel_event != nullptr) {
+            SetEvent(App().cancel_event);
+            EnableWindow(App().cancel, FALSE);
             SetStatus(L"Cancelling...");
           }
           return 0;
@@ -1205,7 +1221,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w_param,
           }
           return 0;
         case kMenuClearLog:
-          SetWindowTextW(g_app.log, L"");
+          SetWindowTextW(App().log, L"");
           return 0;
         case kMenuSaveLog:
           SaveLog();
@@ -1220,15 +1236,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w_param,
           ShowAbout();
           return 0;
         case kMenuAdvDataSections:
-          g_app.create_data_sections = !g_app.create_data_sections;
+          App().create_data_sections = !App().create_data_sections;
           UpdateAdvancedMenu();
           return 0;
         case kMenuAdvNoScylla:
-          g_app.disable_scylla = !g_app.disable_scylla;
+          App().disable_scylla = !App().disable_scylla;
           UpdateAdvancedMenu();
           return 0;
         case kMenuAdvFixRelocs:
-          g_app.fix_relocations = !g_app.fix_relocations;
+          App().fix_relocations = !App().fix_relocations;
           UpdateAdvancedMenu();
           return 0;
         default:
@@ -1238,7 +1254,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w_param,
     }
 
     case WM_DROPFILES: {
-      if (g_app.running) {
+      if (App().running) {
         DragFinish(reinterpret_cast<HDROP>(w_param));
         return 0;
       }
@@ -1248,8 +1264,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w_param,
         std::wstring path(static_cast<size_t>(length) + 1, L'\0');
         DragQueryFileW(drop, 0, path.data(), length + 1);
         path.resize(length);
-        g_loggedTarget.clear();
-        SetWindowTextW(g_app.target, path.c_str());
+        LoggedTarget().clear();
+        SetWindowTextW(App().target, path.c_str());
         UpdateCommandUi();
       }
       DragFinish(drop);
@@ -1275,16 +1291,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w_param,
     }
 
     case kMsgDone: {
-      if (g_app.worker != nullptr) {
-        WaitForSingleObject(g_app.worker, INFINITE);
-        CloseHandle(g_app.worker);
-        g_app.worker = nullptr;
+      if (App().worker != nullptr) {
+        WaitForSingleObject(App().worker, INFINITE);
+        CloseHandle(App().worker);
+        App().worker = nullptr;
       }
-      if (g_app.cancel_event != nullptr) {
-        CloseHandle(g_app.cancel_event);
-        g_app.cancel_event = nullptr;
+      if (App().cancel_event != nullptr) {
+        CloseHandle(App().cancel_event);
+        App().cancel_event = nullptr;
       }
-      g_app.cancel_event_name.clear();
+      App().cancel_event_name.clear();
       SetCancellationEvent(nullptr);
       SetRunning(false);
       SetStatus(w_param != 0 ? L"Completed successfully."
@@ -1293,7 +1309,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w_param,
     }
 
     case WM_CLOSE:
-      if (g_app.running) {
+      if (App().running) {
         MessageBoxW(hwnd,
                     L"An operation is still running. Please wait for it to "
                     L"finish.",
@@ -1305,25 +1321,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w_param,
 
     case WM_DESTROY:
       KillTimer(hwnd, kTargetTimerId);
-      if (g_app.cancel_event != nullptr) {
-        CloseHandle(g_app.cancel_event);
-        g_app.cancel_event = nullptr;
+      if (App().cancel_event != nullptr) {
+        CloseHandle(App().cancel_event);
+        App().cancel_event = nullptr;
       }
-      if (g_app.worker != nullptr) {
-        CloseHandle(g_app.worker);
-        g_app.worker = nullptr;
+      if (App().worker != nullptr) {
+        CloseHandle(App().worker);
+        App().worker = nullptr;
       }
-      if (g_app.accel != nullptr) {
-        DestroyAcceleratorTable(g_app.accel);
-        g_app.accel = nullptr;
+      if (App().accel != nullptr) {
+        DestroyAcceleratorTable(App().accel);
+        App().accel = nullptr;
       }
-      if (g_app.log_font != nullptr && g_app.log_font != g_app.ui_font) {
-        DeleteObject(g_app.log_font);
-        g_app.log_font = nullptr;
+      if (App().log_font != nullptr && App().log_font != App().ui_font) {
+        DeleteObject(App().log_font);
+        App().log_font = nullptr;
       }
-      if (g_app.ui_font != nullptr) {
-        DeleteObject(g_app.ui_font);
-        g_app.ui_font = nullptr;
+      if (App().ui_font != nullptr) {
+        DeleteObject(App().ui_font);
+        App().ui_font = nullptr;
       }
       DragAcceptFiles(hwnd, FALSE);
       PostQuitMessage(0);
@@ -1637,10 +1653,10 @@ extern "C" int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/,
   SetProcessDPIAware();
   DisableVisualStyles();
 
-  g_app.instance = instance;
+  App().instance = instance;
 
   HDC screen = GetDC(nullptr);
-  g_dpi = screen != nullptr ? GetDeviceCaps(screen, LOGPIXELSY) : 96;
+  DpiScale() = screen != nullptr ? GetDeviceCaps(screen, LOGPIXELSY) : 96;
   if (screen != nullptr) {
     ReleaseDC(nullptr, screen);
   }
@@ -1664,8 +1680,8 @@ extern "C" int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/,
               L"&Fix DLL relocations");
   AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(advanced_menu),
               L"&Advanced");
-  g_app.menu = menu;
-  g_app.advanced_menu = advanced_menu;
+  App().menu = menu;
+  App().advanced_menu = advanced_menu;
 
   HMENU help_menu = CreatePopupMenu();
   AppendMenuW(help_menu, MF_STRING, kMenuAbout, L"&About");
@@ -1703,7 +1719,7 @@ extern "C" int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/,
 
   if (arguments != nullptr) {
     if (argument_count >= 2 && arguments[1][0] != L'-') {
-      SetWindowTextW(g_app.target, arguments[1]);
+      SetWindowTextW(App().target, arguments[1]);
     }
     LocalFree(arguments);
     arguments = nullptr;
@@ -1717,7 +1733,7 @@ extern "C" int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/,
   accelerator[1].fVirt = FVIRTKEY | FCONTROL;
   accelerator[1].key = 'S';
   accelerator[1].cmd = kMenuSaveLog;
-  g_app.accel = CreateAcceleratorTableW(accelerator, 2);
+  App().accel = CreateAcceleratorTableW(accelerator, 2);
 
   SetLog(GuiLogSink);
   SetStatusReporter(GuiStatusSink);
@@ -1729,8 +1745,8 @@ extern "C" int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/,
 
   MSG message{};
   while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-    if (g_app.accel == nullptr ||
-        !TranslateAcceleratorW(hwnd, g_app.accel, &message)) {
+    if (App().accel == nullptr ||
+        !TranslateAcceleratorW(hwnd, App().accel, &message)) {
       TranslateMessage(&message);
       DispatchMessageW(&message);
     }
