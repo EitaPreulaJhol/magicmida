@@ -1,13 +1,18 @@
 // Magicmida - C++ port
 // 64-bit Themida/WinLicense unpacking logic (ported from Themida64.pas).
+// SPDX-License-Identifier: GPL-3.0-only
 #include "themida64.h"
+
+#include <algorithm>
+#include <cstring>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "pe_report.h"
 #include "reloc_fix.h"
 #include "scyllahide.h"
-
-#include <algorithm>
-#include <cstring>
 
 namespace magicmida {
 namespace {
@@ -22,17 +27,17 @@ std::string SectionNameTrimmed(const IMAGE_SECTION_HEADER& header) {
 
 ThemidaDebugger64::ThemidaDebugger64(const std::wstring& executable,
                                      const std::wstring& parameters,
-                                     bool createData, bool useScyllaHide,
-                                     bool fixRelocations)
+                                     bool create_data, bool use_scylla_hide,
+                                     bool fix_relocations)
     : ThemidaCommon(executable, parameters) {
-  createDataSections_ = createData;  // Currently does nothing.
-  useScyllaHide_ = useScyllaHide;
-  fixRelocations_ = fixRelocations;
-  themidaV3_ = true;                 // Themida V2 is not supported on x64 atm.
+  create_data_sections_ = create_data;  // Currently does nothing.
+  use_scylla_hide_ = use_scylla_hide;
+  fix_relocations_ = fix_relocations;
+  themida_v3_ = true;  // Themida V2 is not supported on x64 atm.
 }
 
 bool ThemidaDebugger64::InImageBounds(uintptr_t address) const {
-  return address >= imageBase_ && address < imageBoundary_;
+  return address >= image_base_ && address < image_boundary_;
 }
 
 // --------------------------------------------------------------------------
@@ -40,196 +45,184 @@ bool ThemidaDebugger64::InImageBounds(uintptr_t address) const {
 // --------------------------------------------------------------------------
 
 void ThemidaDebugger64::SelectThemidaSection(uintptr_t address) {
-  for (const IMAGE_SECTION_HEADER& section : peSections_) {
-    if (address >= section.VirtualAddress + imageBase_ &&
-        address < section.VirtualAddress + section.Misc.VirtualSize +
-                      imageBase_) {
-      tmSectR_ = MemoryRegion(section.VirtualAddress + imageBase_,
-                              section.Misc.VirtualSize);
-      tmSectStorage_ = std::make_unique<uint8_t[]>(tmSectR_.Size);
-      tmSect_ = tmSectStorage_.get();
-      if (!RPM(tmSectR_.Address, tmSect_, tmSectR_.Size)) {
-        tmSectStorage_.reset();
-        tmSect_ = nullptr;
+  for (const IMAGE_SECTION_HEADER& section : pe_sections_) {
+    if (address >= section.VirtualAddress + image_base_ &&
+        address <
+            section.VirtualAddress + section.Misc.VirtualSize + image_base_) {
+      tm_sect_r_ = MemoryRegion(section.VirtualAddress + image_base_,
+                                section.Misc.VirtualSize);
+      tm_sect_storage_ = std::make_unique<uint8_t[]>(tm_sect_r_.size);
+      tm_sect_ = tm_sect_storage_.get();
+      if (!Rpm(tm_sect_r_.address, tm_sect_, tm_sect_r_.size)) {
+        tm_sect_storage_.reset();
+        tm_sect_ = nullptr;
       }
-      LogF(ltInfo, "TMSect: %llX (%zu bytes)",
-           static_cast<unsigned long long>(tmSectR_.Address), tmSectR_.Size);
+      LogF(kLogInfo, "TMSect: %llX (%zu bytes)",
+           static_cast<uint64_t>(tm_sect_r_.address), tm_sect_r_.size);
       break;
     }
   }
 
-  if (tmSect_ == nullptr) {
-    throw std::runtime_error(
-        Format("Unable to find section for %llX",
-               static_cast<unsigned long long>(address)));
+  if (tm_sect_ == nullptr) {
+    throw std::runtime_error(Format("Unable to find section for %llX",
+                                    static_cast<uint64_t>(address)));
   }
 }
 
-void ThemidaDebugger64::OnDebugStart(HANDLE& hPE, HANDLE hThread) {
-  if (useScyllaHide_) {
-    std::string scyllaError;
+void ThemidaDebugger64::OnDebugStart(HANDLE& file_handle,
+                                     HANDLE thread_handle) {
+  if (use_scylla_hide_) {
+    std::string scylla_error;
     if (!scyllahide::Start(process_.hProcess, process_.dwProcessId,
-                           scyllahide::DefaultProfile(), &scyllaError)) {
-      throw std::runtime_error("ScyllaHide injection failed: " + scyllaError);
+                           scyllahide::DefaultProfile(), &scylla_error)) {
+      throw std::runtime_error("ScyllaHide injection failed: " + scylla_error);
     }
-    LogF(ltGood, "Applying embedded ScyllaHide (%s)",
-         scyllahide::Version());
+    LogF(kLogGood, "Applying embedded ScyllaHide (%s)", scyllahide::Version());
   } else {
-    Log(ltWarning,
+    Log(kLogWarning,
         "ScyllaHide disabled by the Disable ScyllaHide option; Themida64 may "
         "detect the debugger");
   }
 
-  virtualAllocAPI_ = reinterpret_cast<void*>(
+  virtual_alloc_api_ = reinterpret_cast<void*>(
       GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "VirtualAlloc"));
 
-  sleepAPI_ = reinterpret_cast<uintptr_t>(
+  sleep_api_ = reinterpret_cast<uintptr_t>(
       GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "Sleep"));
-  lstrlenAPI_ = reinterpret_cast<uintptr_t>(
+  lstrlen_api_ = reinterpret_cast<uintptr_t>(
       GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "lstrlen"));
 
-  TMInit(hPE);
+  TmInit(file_handle);
 }
 
 DWORD ThemidaDebugger64::OnAccessViolation(
-    HANDLE hThread, const EXCEPTION_RECORD& exceptionRecord) {
-  if (IsGuardedAddress(exceptionRecord.ExceptionInformation[1])) {
-    return ProcessGuardedAccess(hThread, exceptionRecord);
+    HANDLE thread_handle, const EXCEPTION_RECORD& exception_record) {
+  if (IsGuardedAddress(exception_record.ExceptionInformation[1])) {
+    return ProcessGuardedAccess(thread_handle, exception_record);
   }
-  return ThemidaCommon::OnAccessViolation(hThread, exceptionRecord);
+  return ThemidaCommon::OnAccessViolation(thread_handle, exception_record);
 }
 
-void ThemidaDebugger64::OnDLLLoad(const std::wstring& fileName,
-                                  void* baseAddress) {
-  const std::string lowered = AsciiLowerCase(WideToUtf8(fileName));
+void ThemidaDebugger64::OnDllLoad(const std::wstring& file_name,
+                                  void* base_address) {
+  const std::string lowered = AsciiLowerCase(WideToUtf8(file_name));
   if (lowered.find("\\mscoree.dll") != std::string::npos) {
-    Log(ltInfo, "This might be a .NET program - setting _CorExeMain BP");
-    const HMODULE hCorEE = LoadLibraryW(L"mscoree.dll");  // Load in this process
-    if (hCorEE == baseAddress) {
-      corExeMain_ = reinterpret_cast<void*>(
-          GetProcAddress(hCorEE, "_CorExeMain"));
-      SetSoftBP(reinterpret_cast<uintptr_t>(corExeMain_));
+    Log(kLogInfo, "This might be a .NET program - setting _CorExeMain BP");
+    const HMODULE cor_exe_module =
+        LoadLibraryW(L"mscoree.dll");  // Load in this process
+    if (cor_exe_module == base_address) {
+      cor_exe_main_ = reinterpret_cast<void*>(
+          GetProcAddress(cor_exe_module, "_CorExeMain"));
+      SetSoftBp(reinterpret_cast<uintptr_t>(cor_exe_main_));
     } else {
-      Log(ltFatal, "DLL was loaded at different base than in target!");
+      Log(kLogFatal, "DLL was loaded at different base than in target!");
     }
   }
 
-  scyllahide::OnDllLoad(fileName);
+  scyllahide::OnDllLoad(file_name);
 
-  ThemidaCommon::OnDLLLoad(fileName, baseAddress);
+  ThemidaCommon::OnDllLoad(file_name, base_address);
 }
 
-void ThemidaDebugger64::OnHardwareBreakpoint(HANDLE /*hThread*/,
-                                             uintptr_t bpAddress,
+void ThemidaDebugger64::OnHardwareBreakpoint(HANDLE /*thread_handle*/,
+                                             uintptr_t bp_address,
                                              CONTEXT& context) {
   const uintptr_t eip = context.Rip;
 
-  if (eip == reinterpret_cast<uintptr_t>(closeHandleAPI_)) {
+  if (eip == reinterpret_cast<uintptr_t>(close_handle_api_)) {
     uintptr_t buf = 0;
-    RPM(context.Rsp, &buf, 8);
+    Rpm(context.Rsp, &buf, 8);
 
-    LogF(ltInfo, "CloseHandle called from from %p",
+    LogF(kLogInfo, "CloseHandle called from from %p",
          reinterpret_cast<void*>(buf));
 
     if (InImageBounds(buf)) {
       ResetBreakpoint(eip);
-      SetBreakpoint(imageBase_ + 0x1000, HWBPType::Write);
+      SetBreakpoint(image_base_ + 0x1000, HwbpType::kWrite);
     }
-  } else if (eip == reinterpret_cast<uintptr_t>(virtualAllocAPI_)) {
+  } else if (eip == reinterpret_cast<uintptr_t>(virtual_alloc_api_)) {
     uintptr_t buf = 0;
-    RPM(context.Rsp, &buf, 8);
-    LogF(ltInfo, "AllocMem called from %llX",
-         static_cast<unsigned long long>(buf));
+    Rpm(context.Rsp, &buf, 8);
+    LogF(kLogInfo, "AllocMem called from %llX", static_cast<uint64_t>(buf));
 
     if (InImageBounds(buf)) {
-      ResetBreakpoint(reinterpret_cast<uintptr_t>(virtualAllocAPI_));
+      ResetBreakpoint(reinterpret_cast<uintptr_t>(virtual_alloc_api_));
       InstallCodeSectionGuard();
     }
-  } else if (bpAddress == imageBase_ + 0x1000) {
-    LogF(ltGood, "Wrote to .text base from %llX",
-         static_cast<unsigned long long>(eip));
+  } else if (bp_address == image_base_ + 0x1000) {
+    LogF(kLogGood, "Wrote to .text base from %llX", static_cast<uint64_t>(eip));
 
-    if (tmSectR_.Address == 0) {
+    if (tm_sect_r_.address == 0) {
       SelectThemidaSection(eip);
     }
 
-    ResetBreakpoint(imageBase_ + 0x1000);
-    SetBreakpoint(reinterpret_cast<uintptr_t>(virtualAllocAPI_),
-                  HWBPType::Execute);
+    ResetBreakpoint(image_base_ + 0x1000);
+    SetBreakpoint(reinterpret_cast<uintptr_t>(virtual_alloc_api_),
+                  HwbpType::kExecute);
   } else {
-    LogF(ltInfo, "Accessed %llx from %p",
-         static_cast<unsigned long long>(bpAddress),
+    LogF(kLogInfo, "Accessed %llx from %p", static_cast<uint64_t>(bp_address),
          reinterpret_cast<void*>(eip));
   }
 }
 
-DWORD ThemidaDebugger64::OnSinglestep(uintptr_t bpAddress) {
-  if (guardStepping_) {
-    DWORD oldProtect = 0;
-    if (!VirtualProtectEx(process_.hProcess,
-                          reinterpret_cast<void*>(guardStart_),
-                          guardEnd_ - guardStart_, PAGE_NOACCESS,
-                          &oldProtect)) {
+DWORD ThemidaDebugger64::OnSinglestep(uintptr_t bp_address) {
+  if (guard_stepping_) {
+    DWORD old_protect = 0;
+    if (!VirtualProtectEx(
+            process_.hProcess, reinterpret_cast<void*>(guard_start_),
+            guard_end_ - guard_start_, PAGE_NOACCESS, &old_protect)) {
       throw std::runtime_error(
           Format("VirtualProtectEx failed (error %lu)", GetLastError()));
     }
-    guardStepping_ = false;
+    guard_stepping_ = false;
     return DBG_CONTINUE;
   }
 
-  return ThemidaCommon::OnSinglestep(bpAddress);
+  return ThemidaCommon::OnSinglestep(bp_address);
 }
 
-SoftBPAction ThemidaDebugger64::OnSoftwareBreakpoint(HANDLE /*hThread*/,
-                                                     uintptr_t bpAddress) {
-  if (bpAddress == reinterpret_cast<uintptr_t>(corExeMain_)) {
-    DumperDotnet dumper(process_, imageBase_);
+SoftBpAction ThemidaDebugger64::OnSoftwareBreakpoint(HANDLE /*thread_handle*/,
+                                                     uintptr_t bp_address) {
+  if (bp_address == reinterpret_cast<uintptr_t>(cor_exe_main_)) {
+    DumperDotnet dumper(process_, image_base_);
     dumper.DumpToFile(ExtractFilePath(executable_) +
                       ChangeFileExt(ExtractFileName(executable_),
                                     L"U" + ExtractFileExt(executable_)));
-    Log(ltGood, ".NET process dumped.");
+    Log(kLogGood, ".NET process dumped.");
     MarkSuccess();
 
-    hideThreadEnd_ = true;
+    hide_thread_end_ = true;
     TerminateProcess(process_.hProcess, 0);
-    return SoftBPAction::ClearContinue;
+    return SoftBpAction::kClearContinue;
   }
 
   throw std::runtime_error(
-      Format("Unexpected SoftBP at %p", reinterpret_cast<void*>(bpAddress)));
+      Format("Unexpected SoftBP at %p", reinterpret_cast<void*>(bp_address)));
 }
 
-void ThemidaDebugger64::DumpContext(DWORD threadId) {
-  HANDLE hThread = GetThread(threadId);
+void ThemidaDebugger64::DumpContext(DWORD thread_id) {
+  HANDLE thread_handle = GetThread(thread_id);
   CONTEXT context{};
   context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
-  if (!GetThreadContext(hThread, &context)) {
-    Log(ltFatal, "DumpContext: GetThreadContext failed");
+  if (!GetThreadContext(thread_handle, &context)) {
+    Log(kLogFatal, "DumpContext: GetThreadContext failed");
     return;
   }
 
-  LogF(ltInfo, "rax: %llX rbx: %llX rcx: %llX rdx: %llX rsi: %llX rdi: %llX",
-       static_cast<unsigned long long>(context.Rax),
-       static_cast<unsigned long long>(context.Rbx),
-       static_cast<unsigned long long>(context.Rcx),
-       static_cast<unsigned long long>(context.Rdx),
-       static_cast<unsigned long long>(context.Rsi),
-       static_cast<unsigned long long>(context.Rdi));
-  LogF(ltInfo,
+  LogF(kLogInfo, "rax: %llX rbx: %llX rcx: %llX rdx: %llX rsi: %llX rdi: %llX",
+       static_cast<uint64_t>(context.Rax), static_cast<uint64_t>(context.Rbx),
+       static_cast<uint64_t>(context.Rcx), static_cast<uint64_t>(context.Rdx),
+       static_cast<uint64_t>(context.Rsi), static_cast<uint64_t>(context.Rdi));
+  LogF(kLogInfo,
        "r8: %llX r9: %llX r10: %llX r11: %llX r12: %llX r13: %llX r14: %llX "
        "r15: %llX",
-       static_cast<unsigned long long>(context.R8),
-       static_cast<unsigned long long>(context.R9),
-       static_cast<unsigned long long>(context.R10),
-       static_cast<unsigned long long>(context.R11),
-       static_cast<unsigned long long>(context.R12),
-       static_cast<unsigned long long>(context.R13),
-       static_cast<unsigned long long>(context.R14),
-       static_cast<unsigned long long>(context.R15));
-  LogF(ltInfo, "rip: %llX rbp: %llX rsp: %llX eflags: %lX",
-       static_cast<unsigned long long>(context.Rip),
-       static_cast<unsigned long long>(context.Rbp),
-       static_cast<unsigned long long>(context.Rsp),
+       static_cast<uint64_t>(context.R8), static_cast<uint64_t>(context.R9),
+       static_cast<uint64_t>(context.R10), static_cast<uint64_t>(context.R11),
+       static_cast<uint64_t>(context.R12), static_cast<uint64_t>(context.R13),
+       static_cast<uint64_t>(context.R14), static_cast<uint64_t>(context.R15));
+  LogF(kLogInfo, "rip: %llX rbp: %llX rsp: %llX eflags: %lX",
+       static_cast<uint64_t>(context.Rip), static_cast<uint64_t>(context.Rbp),
+       static_cast<uint64_t>(context.Rsp),
        static_cast<unsigned long>(context.EFlags));
 }
 
@@ -237,95 +230,95 @@ void ThemidaDebugger64::DumpContext(DWORD threadId) {
 // Themida section handling
 // --------------------------------------------------------------------------
 
-void ThemidaDebugger64::TMInit(HANDLE& hPE) {
-  if (hPE == nullptr || hPE == INVALID_HANDLE_VALUE) {
-    hPE = CreateFileW(executable_.c_str(), GENERIC_READ, FILE_SHARE_READ,
-                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hPE == INVALID_HANDLE_VALUE) {
-      throw std::runtime_error(
-          Format("CreateFile code %lu", GetLastError()));
+void ThemidaDebugger64::TmInit(HANDLE& file_handle) {
+  if (file_handle == nullptr || file_handle == INVALID_HANDLE_VALUE) {
+    file_handle =
+        CreateFileW(executable_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file_handle == INVALID_HANDLE_VALUE) {
+      throw std::runtime_error(Format("CreateFile code %lu", GetLastError()));
     }
   }
 
-  SetFilePointer(hPE, 0, nullptr, FILE_BEGIN);
+  SetFilePointer(file_handle, 0, nullptr, FILE_BEGIN);
 
   uint8_t buffer[0x1000]{};
-  DWORD bytesRead = 0;
-  if (!ReadFile(hPE, buffer, sizeof(buffer), &bytesRead, nullptr)) {
+  DWORD bytes_read = 0;
+  if (!ReadFile(file_handle, buffer, sizeof(buffer), &bytes_read, nullptr)) {
     throw std::runtime_error(
         Format("ReadFile failed! Code: %lu", GetLastError()));
   }
 
-  const uint64_t ntOffset =
-      static_cast<uint64_t>(reinterpret_cast<IMAGE_DOS_HEADER*>(buffer)->e_lfanew);
-  if (ntOffset + sizeof(IMAGE_NT_HEADERS) > sizeof(buffer)) {
+  const uint64_t nt_offset = static_cast<uint64_t>(
+      reinterpret_cast<IMAGE_DOS_HEADER*>(buffer)->e_lfanew);
+  if (nt_offset + sizeof(IMAGE_NT_HEADERS) > sizeof(buffer)) {
     throw std::runtime_error("Truncated NT headers");
   }
-  uint8_t* const ntBase = buffer + ntOffset;
-  auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(ntBase);
+  uint8_t* const nt_base = buffer + nt_offset;
+  auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(nt_base);
   auto* sections = reinterpret_cast<IMAGE_SECTION_HEADER*>(
-      ntBase + sizeof(IMAGE_NT_HEADERS));
-  const uint64_t sectionBytes =
+      nt_base + sizeof(IMAGE_NT_HEADERS));
+  const uint64_t section_bytes =
       static_cast<uint64_t>(nt->FileHeader.NumberOfSections) *
       sizeof(IMAGE_SECTION_HEADER);
-  if (reinterpret_cast<uint64_t>(sections) + sectionBytes >
+  if (reinterpret_cast<uint64_t>(sections) + section_bytes >
       reinterpret_cast<uint64_t>(buffer) + sizeof(buffer)) {
     throw std::runtime_error("Truncated section table");
   }
 
-  InitPEDetails(nt);
+  InitPeDetails(nt);
 
-  if (peSections_.size() < 3) {
+  if (pe_sections_.size() < 3) {
     throw std::runtime_error("Unexpected PE layout (less than 3 sections)");
   }
 
-  baseOfData_ = sections[0].VirtualAddress + nt->OptionalHeader.SizeOfCode;
+  base_of_data_ = sections[0].VirtualAddress + nt->OptionalHeader.SizeOfCode;
 
   // PE header antidump.
   if (sections[2].Name[0] == 'i') {
-    const uintptr_t test =
-        reinterpret_cast<uintptr_t>(&sections[2].Name[0]) -
-        reinterpret_cast<uintptr_t>(buffer) + imageBase_;
-    DWORD oldProtect = 0;
+    const uintptr_t test = reinterpret_cast<uintptr_t>(&sections[2].Name[0]) -
+                           reinterpret_cast<uintptr_t>(buffer) + image_base_;
+    DWORD old_protect = 0;
     VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(test), 1,
-                     PAGE_READWRITE, &oldProtect);
+                     PAGE_READWRITE, &old_protect);
     uint32_t value = 'p';
     if (!WriteProcessMemory(process_.hProcess, reinterpret_cast<void*>(test),
                             &value, 1, nullptr)) {
-      throw std::runtime_error(
-          Format("Fixing PE header antidump failed! Code: %lu",
-                 GetLastError()));
+      throw std::runtime_error(Format(
+          "Fixing PE header antidump failed! Code: %lu", GetLastError()));
     }
   }
 
   if (SectionNameTrimmed(sections[0]) == ".text") {
     // Code not encrypted/compressed.
-    Log(ltGood, "Text section not encrypted/compressed, installing page guard");
+    Log(kLogGood,
+        "Text section not encrypted/compressed, installing page guard");
     InstallCodeSectionGuard();
   } else {
-    closeHandleAPI_ = reinterpret_cast<void*>(
+    close_handle_api_ = reinterpret_cast<void*>(
         GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CloseHandle"));
-    SetBreakpoint(reinterpret_cast<uintptr_t>(closeHandleAPI_),
-                  HWBPType::Execute);
+    SetBreakpoint(reinterpret_cast<uintptr_t>(close_handle_api_),
+                  HwbpType::kExecute);
   }
 
   if (nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size > 0) {
-    const auto& tlsDirectory =
+    const auto& tls_directory =
         nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
     IMAGE_TLS_DIRECTORY64 tls{};
-    if (RPM(imageBase_ + tlsDirectory.VirtualAddress, &tls,
-            std::min<uint32_t>(tlsDirectory.Size, sizeof(tls)))) {
+    if (Rpm(image_base_ + tls_directory.VirtualAddress, &tls,
+            std::min<uint32_t>(tls_directory.Size, sizeof(tls)))) {
       // NOTE: This is an MSVC-ism, where we assume the TLS callback pointers
       // are located right before the TLS directory. This allows us to
       // determine the amount of callbacks.
-      const intptr_t tlsDistance =
-          static_cast<intptr_t>(imageBase_ + tlsDirectory.VirtualAddress) -
+      const intptr_t tls_distance =
+          static_cast<intptr_t>(image_base_ + tls_directory.VirtualAddress) -
           static_cast<intptr_t>(tls.AddressOfCallBacks);
-      if (tlsDistance > 0 &&
-          tlsDistance <= static_cast<intptr_t>(sizeof(uintptr_t) * (4 + 1))) {
+      if (tls_distance > 0 &&
+          tls_distance <= static_cast<intptr_t>(sizeof(uintptr_t) * (4 + 1))) {
         // Assume at most 4 TLS entries + zero terminator.
-        tlsTotal_ = static_cast<uint32_t>(tlsDistance / sizeof(uintptr_t)) - 1;
-        LogF(ltInfo, "[MSVC] Expecting %u TLS entries", tlsTotal_);
+        tls_total_ =
+            static_cast<uint32_t>(tls_distance / sizeof(uintptr_t)) - 1;
+        LogF(kLogInfo, "[MSVC] Expecting %u TLS entries", tls_total_);
       }
     }
   }
@@ -336,91 +329,92 @@ void ThemidaDebugger64::TMInit(HANDLE& hPE) {
 // --------------------------------------------------------------------------
 
 void ThemidaDebugger64::InstallCodeSectionGuard() {
-  guardStart_ = imageBase_ + peSections_[0].VirtualAddress;
-  guardEnd_ = imageBase_ + baseOfData_;
-  DWORD oldProtect = 0;
-  VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(guardStart_),
-                   guardEnd_ - guardStart_, PAGE_NOACCESS, &oldProtect);
+  guard_start_ = image_base_ + pe_sections_[0].VirtualAddress;
+  guard_end_ = image_base_ + base_of_data_;
+  DWORD old_protect = 0;
+  VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(guard_start_),
+                   guard_end_ - guard_start_, PAGE_NOACCESS, &old_protect);
 }
 
 bool ThemidaDebugger64::IsGuardedAddress(uintptr_t address) {
-  if (guardStart_ == 0) {
+  if (guard_start_ == 0) {
     return false;
   }
-  return address >= guardStart_ && address < guardEnd_;
+  return address >= guard_start_ && address < guard_end_;
 }
 
 DWORD ThemidaDebugger64::ProcessGuardedAccess(
-    HANDLE hThread, const EXCEPTION_RECORD& exceptionRecord) {
-  LogF(ltInfo, "[Guard] %s %llX",
+    HANDLE thread_handle, const EXCEPTION_RECORD& exception_record) {
+  LogF(kLogInfo, "[Guard] %s %llX",
        AccessViolationFlagToStr(
-           static_cast<uint8_t>(exceptionRecord.ExceptionInformation[0]))
+           static_cast<uint8_t>(exception_record.ExceptionInformation[0]))
            .c_str(),
-       static_cast<unsigned long long>(exceptionRecord.ExceptionInformation[1]));
+       static_cast<uint64_t>(exception_record.ExceptionInformation[1]));
 
-  DWORD oldProtect = 0;
-  VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(guardStart_),
-                   guardEnd_ - guardStart_, PAGE_EXECUTE_READWRITE, &oldProtect);
+  DWORD old_protect = 0;
+  VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(guard_start_),
+                   guard_end_ - guard_start_, PAGE_EXECUTE_READWRITE,
+                   &old_protect);
 
-  const uintptr_t exceptionAddress =
-      reinterpret_cast<uintptr_t>(exceptionRecord.ExceptionAddress);
+  const uintptr_t exception_address =
+      reinterpret_cast<uintptr_t>(exception_record.ExceptionAddress);
 
-  if (tmGuard_) {
+  if (tm_guard_) {
     // We've hit the Themida section after executing a TLS entrypoint.
-    tmGuard_ = false;
+    tm_guard_ = false;
     InstallCodeSectionGuard();
-  } else if (!InImageBounds(exceptionAddress)) {
+  } else if (!InImageBounds(exception_address)) {
     // Random library code reading our text base...
-    guardStepping_ = true;
-  } else if (exceptionAddress > guardEnd_) {
+    guard_stepping_ = true;
+  } else if (exception_address > guard_end_) {
     // Themida access.
-    if (tmSectR_.Address == 0) {
-      SelectThemidaSection(exceptionAddress);
+    if (tm_sect_r_.address == 0) {
+      SelectThemidaSection(exception_address);
     }
 
-    guardAddrs_.push_back(exceptionRecord.ExceptionInformation[1]);
-    guardStepping_ = true;
-  } else if (exceptionRecord.ExceptionInformation[0] == 8 && tlsTotal_ > 0 &&
-             tlsCounter_ < tlsTotal_) {
-    ++tlsCounter_;
-    LogF(ltGood, "TLS %u: %.9llX", tlsCounter_,
-         static_cast<unsigned long long>(exceptionAddress));
-    guardStart_ = tmSectR_.Address;
-    guardEnd_ = imageBoundary_;
-    tmGuard_ = true;
+    guard_addrs_.push_back(exception_record.ExceptionInformation[1]);
+    guard_stepping_ = true;
+  } else if (exception_record.ExceptionInformation[0] == 8 && tls_total_ > 0 &&
+             tls_counter_ < tls_total_) {
+    ++tls_counter_;
+    LogF(kLogGood, "TLS %u: %.9llX", tls_counter_,
+         static_cast<uint64_t>(exception_address));
+    guard_start_ = tm_sect_r_.address;
+    guard_end_ = image_boundary_;
+    tm_guard_ = true;
     // Allow R/W, disallow execute. Some weird binaries read a byte at the PE's
     // AddressOfEntryPoint in TLS...
-    VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(guardStart_),
-                     guardEnd_ - guardStart_, PAGE_READWRITE, &oldProtect);
-  } else if (traceMSVCOEP_) {
+    VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(guard_start_),
+                     guard_end_ - guard_start_, PAGE_READWRITE, &old_protect);
+  } else if (trace_msvc_oep_) {
     // We're at mainCrtStartup.
-    WriteMSVCOEP(exceptionAddress);
-    FinishUnpacking(msvcOEP_);
+    WriteMsvcOep(exception_address);
+    FinishUnpacking(msvc_oep_);
   } else {
-    uintptr_t oep = exceptionAddress;
+    uintptr_t oep = exception_address;
 
     // Check if virtualized (but goes to .text first for jmp).
-    CheckVirtualizedOEP(oep);
+    CheckVirtualizedOep(oep);
 
     // Check if virtualized and stolen (goes straight into VM without using jmp
     // in .text).
     CONTEXT context{};
     context.ContextFlags = CONTEXT_CONTROL;
-    if (GetThreadContext(hThread, &context)) {
-      uintptr_t returnAddress = 0;
-      RPM(context.Rsp, &returnAddress, 8);
-      if (tmSectR_.Contains(returnAddress)) {
-        LogF(ltInfo, "Return address points into Themida section: %.9llX",
-             static_cast<unsigned long long>(returnAddress));
-        oep = TryFindCorrectOEP(oep);
+    if (GetThreadContext(thread_handle, &context)) {
+      uintptr_t return_address = 0;
+      Rpm(context.Rsp, &return_address, 8);
+      if (tm_sect_r_.Contains(return_address)) {
+        LogF(kLogInfo, "Return address points into Themida section: %.9llX",
+             static_cast<uint64_t>(return_address));
+        oep = TryFindCorrectOep(oep);
 
-        if (traceMSVCOEP_) {
-          msvcOEP_ = oep;
+        if (trace_msvc_oep_) {
+          msvc_oep_ = oep;
 
           // Skip and wait for next .text hit.
-          context.Rip = returnAddress;
+          context.Rip = return_address;
           context.Rsp += 8;
-          if (!SetThreadContext(hThread, &context)) {
+          if (!SetThreadContext(thread_handle, &context)) {
             throw std::runtime_error(
                 Format("SetThreadContext failed (error %lu)", GetLastError()));
           }
@@ -429,25 +423,25 @@ DWORD ThemidaDebugger64::ProcessGuardedAccess(
           return DBG_CONTINUE;
         }
       } else {
-        LogF(ltGood, "OEP: %llX", static_cast<unsigned long long>(oep));
+        LogF(kLogGood, "OEP: %llX", static_cast<uint64_t>(oep));
       }
     } else {
-      Log(ltFatal, "GetThreadContext failed for further OEP check");
+      Log(kLogFatal, "GetThreadContext failed for further OEP check");
     }
 
     FinishUnpacking(oep);
   }
 
-  if (guardStepping_) {
+  if (guard_stepping_) {
     // Single-step, then re-protect in OnSinglestep.
     CONTEXT context{};
     context.ContextFlags = CONTEXT_CONTROL;
-    if (!GetThreadContext(hThread, &context)) {
+    if (!GetThreadContext(thread_handle, &context)) {
       throw std::runtime_error(
           Format("GetThreadContext failed (error %lu)", GetLastError()));
     }
     context.EFlags |= 0x100;
-    SetThreadContext(hThread, &context);
+    SetThreadContext(thread_handle, &context);
   }
 
   return DBG_CONTINUE;
@@ -457,13 +451,12 @@ DWORD ThemidaDebugger64::ProcessGuardedAccess(
 // OEP restoration
 // --------------------------------------------------------------------------
 
-uintptr_t ThemidaDebugger64::TryFindCorrectOEP(uintptr_t hitAddress) {
-  uintptr_t result = hitAddress;
-  if (majorLinkerVersion_ != 8 && majorLinkerVersion_ != 9 &&
-      majorLinkerVersion_ != 10 &&
-      majorLinkerVersion_ != 11 && majorLinkerVersion_ != 12 &&
-      majorLinkerVersion_ != 14) {
-    Log(ltFatal,
+uintptr_t ThemidaDebugger64::TryFindCorrectOep(uintptr_t hit_address) {
+  uintptr_t result = hit_address;
+  if (major_linker_version_ != 8 && major_linker_version_ != 9 &&
+      major_linker_version_ != 10 && major_linker_version_ != 11 &&
+      major_linker_version_ != 12 && major_linker_version_ != 14) {
+    Log(kLogFatal,
         "Don't know what to do about OEP for this compiler. Your target "
         "likely won't run.");
     return result;
@@ -471,39 +464,40 @@ uintptr_t ThemidaDebugger64::TryFindCorrectOEP(uintptr_t hitAddress) {
 
   // MSVC: Assume HitAddress is at __security_init_cookie.
   // Scan for call __security_init_cookie; jmp __scrt_common_main_seh
-  const uint32_t textLen =
-      static_cast<uint32_t>(baseOfData_ - peSections_[0].VirtualAddress);
-  std::vector<uint8_t> textBuffer(textLen);
-  RPM(imageBase_ + peSections_[0].VirtualAddress, textBuffer.data(),
-      textBuffer.size());
+  const uint32_t text_len =
+      static_cast<uint32_t>(base_of_data_ - pe_sections_[0].VirtualAddress);
+  std::vector<uint8_t> text_buffer(text_len);
+  Rpm(image_base_ + pe_sections_[0].VirtualAddress, text_buffer.data(),
+      text_buffer.size());
 
-  const uint32_t scanFor = static_cast<uint32_t>(
-      hitAddress - imageBase_ - peSections_[0].VirtualAddress);
-  for (uint32_t i = 0; i + 10 <= textLen; ++i) {
-    if (textBuffer[i] == 0xE8 && textBuffer[i + 5] == 0xE9 &&
-        *reinterpret_cast<const uint32_t*>(textBuffer.data() + i + 1) + i + 5 ==
-            scanFor) {
-      result = imageBase_ + peSections_[0].VirtualAddress + i;
-      LogF(ltGood, "Found suitable real OEP %.9llX",
-           static_cast<unsigned long long>(result));
+  const uint32_t scan_for = static_cast<uint32_t>(
+      hit_address - image_base_ - pe_sections_[0].VirtualAddress);
+  for (uint32_t i = 0; i + 10 <= text_len; ++i) {
+    if (text_buffer[i] == 0xE8 && text_buffer[i + 5] == 0xE9 &&
+        *reinterpret_cast<const uint32_t*>(text_buffer.data() + i + 1) + i +
+                5 ==
+            scan_for) {
+      result = image_base_ + pe_sections_[0].VirtualAddress + i;
+      LogF(kLogGood, "Found suitable real OEP %.9llX",
+           static_cast<uint64_t>(result));
       return result;
     }
   }
 
   // Got two suspicious reads as last accesses, checking out the VM jmp at OEP?
-  if (guardAddrs_.size() >= 2 &&
-      guardAddrs_.back() == guardAddrs_[guardAddrs_.size() - 2] + 1) {
-    msvcInitCookie_ = hitAddress;
-    traceMSVCOEP_ = true;
-    return guardAddrs_[guardAddrs_.size() - 2];
+  if (guard_addrs_.size() >= 2 &&
+      guard_addrs_.back() == guard_addrs_[guard_addrs_.size() - 2] + 1) {
+    msvc_init_cookie_ = hit_address;
+    trace_msvc_oep_ = true;
+    return guard_addrs_[guard_addrs_.size() - 2];
   }
 
-  Log(ltFatal, "Real OEP not found. Your target likely won't run.");
+  Log(kLogFatal, "Real OEP not found. Your target likely won't run.");
   return result;
 }
 
-void ThemidaDebugger64::WriteMSVCOEP(uintptr_t crtStartup) {
-#pragma pack(push, 1)
+void ThemidaDebugger64::WriteMsvcOep(uintptr_t crt_startup) {
+  MAGICMIDA_PACK_PUSH_1
   struct {
     uint32_t SubRsp;
     uint8_t Call;
@@ -512,107 +506,107 @@ void ThemidaDebugger64::WriteMSVCOEP(uintptr_t crtStartup) {
     uint8_t Jmp;
     int32_t JmpRel;
   } instructions{};
-#pragma pack(pop)
+  MAGICMIDA_PACK_POP
 
-  DWORD oldProtect = 0;
-  VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(msvcOEP_),
-                   sizeof(instructions), PAGE_EXECUTE_READWRITE, &oldProtect);
+  DWORD old_protect = 0;
+  VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(msvc_oep_),
+                   sizeof(instructions), PAGE_EXECUTE_READWRITE, &old_protect);
 
   instructions.SubRsp = 0x28EC8348;
   instructions.Call = 0xE8;
   instructions.CallRel =
-      static_cast<int32_t>(msvcInitCookie_ - (msvcOEP_ + 4) - 5);
+      static_cast<int32_t>(msvc_init_cookie_ - (msvc_oep_ + 4) - 5);
   instructions.AddRsp = 0x28C48348;
   instructions.Jmp = 0xE9;
   instructions.JmpRel =
-      static_cast<int32_t>(crtStartup - (msvcOEP_ + 4 + 5 + 4) - 5);
+      static_cast<int32_t>(crt_startup - (msvc_oep_ + 4 + 5 + 4) - 5);
 
-  WriteProcessMemory(process_.hProcess, reinterpret_cast<void*>(msvcOEP_),
+  WriteProcessMemory(process_.hProcess, reinterpret_cast<void*>(msvc_oep_),
                      &instructions, sizeof(instructions), nullptr);
 
-  LogF(ltGood, "Virtualized MSVC9+ OEP restored: %llX",
-       static_cast<unsigned long long>(msvcOEP_));
+  LogF(kLogGood, "Virtualized MSVC9+ OEP restored: %llX",
+       static_cast<uint64_t>(msvc_oep_));
 }
 
 void ThemidaDebugger64::FinishUnpacking(uintptr_t oep) {
-  Dumper dumper(process_, executable_, imageBase_, oep);
+  Dumper dumper(process_, executable_, image_base_, oep);
 
   // Look for IAT by analyzing code near OEP.
-  const uintptr_t iat = DetermineIATAddress(oep, dumper);
-  LogF(ltGood, "IAT: %08llX", static_cast<unsigned long long>(iat));
+  const uintptr_t iat = DetermineIatAddress(oep, dumper);
+  LogF(kLogGood, "IAT: %08llX", static_cast<uint64_t>(iat));
 
   TraceImports(iat, dumper);
 
   // Process the IAT into an import directory and dump the binary to disk.
-  const std::wstring fileName = MakeUnpackedFileName(executable_);
-  dumper.IAT = iat;
+  const std::wstring file_name = MakeUnpackedFileName(executable_);
+  dumper.set_iat(iat);
   ReportStatus("Rebuilding imports");
   auto pe = dumper.Process();
   ReportStatus("Writing the dump");
-  dumper.DumpToFile(fileName, *pe, isDll_);
-  LogF(ltGood, "Dump written to: %s", WideToUtf8(fileName).c_str());
+  dumper.DumpToFile(file_name, *pe, is_dll_);
+  LogF(kLogGood, "Dump written to: %s", WideToUtf8(file_name).c_str());
 
-  hideThreadEnd_ = true;
+  hide_thread_end_ = true;
   TerminateProcess(process_.hProcess, 0);
 
-  if (fixRelocations_) {
+  if (fix_relocations_) {
     ReportStatus("Rebuilding relocations");
-    if (isDll_) {
+    if (is_dll_) {
       try {
-        FixDllRelocations(fileName, imageBase_);
+        FixDllRelocations(file_name, image_base_);
       } catch (const std::exception& error) {
-        LogF(ltWarning, "Relocation fix failed: %s", error.what());
+        LogF(kLogWarning, "Relocation fix failed: %s", error.what());
       }
     } else {
-      Log(ltWarning, "The relocation fix is only applied to DLL targets.");
+      Log(kLogWarning, "The relocation fix is only applied to DLL targets.");
     }
   }
 
   ReportStatus("Verifying the dump");
-  VerifyDump(fileName, isDll_, fixRelocations_);
+  VerifyDump(file_name, is_dll_, fix_relocations_);
 
   MarkSuccess();
-  Log(ltGood, "Operation completed successfully.");
+  Log(kLogGood, "Operation completed successfully.");
 }
 
 // --------------------------------------------------------------------------
 // Tracing
 // --------------------------------------------------------------------------
 
-bool ThemidaDebugger64::TraceIsAtAPI(Tracer& tracer, CONTEXT& context) {
+bool ThemidaDebugger64::TraceIsAtApi(Tracer& tracer, CONTEXT& context) {
   if (tracer.Counter() > 100 && tracer.Counter() < 5000) {
-    uint32_t insnData = 0;
-    RPM(context.Rip, &insnData, 4);
-    if (insnData == 0x0CB10FF0) {
+    uint32_t insn_data = 0;
+    Rpm(context.Rip, &insn_data, 4);
+    if (insn_data == 0x0CB10FF0) {
       // First 4 bytes of "lock cmpxchg [rbx+rbp], ecx"
-      traceInVM_ = true;
-      Log(ltInfo, "Trace ran into Themida VM, stopping");
+      trace_in_vm_ = true;
+      Log(kLogInfo, "Trace ran into Themida VM, stopping");
       return true;  // Stop
     }
   }
 
   // Cat & mouse game with fake calls.
-  if (context.Rsp < traceStartSP_ &&
-      (context.Rip == sleepAPI_ || context.Rip == lstrlenAPI_)) {
+  if (context.Rsp < trace_start_sp_ &&
+      (context.Rip == sleep_api_ || context.Rip == lstrlen_api_)) {
     // It'd be better to just execute them, but the tracer currently faults at
     // far jumps for wow64 syscalls.
-    LogF(ltInfo, "Skipping anti-trace API at %p",
+    LogF(kLogInfo, "Skipping anti-trace API at %p",
          reinterpret_cast<void*>(context.Rip));
-    uintptr_t returnAddress = 0;
-    RPM(context.Rsp, &returnAddress, sizeof(returnAddress));
-    context.Rsp += sizeof(returnAddress);
-    context.Rip = returnAddress;
+    uintptr_t return_address = 0;
+    Rpm(context.Rsp, &return_address, sizeof(return_address));
+    context.Rsp += sizeof(return_address);
+    context.Rip = return_address;
   }
 
-  bool result = !tmSectR_.Contains(context.Rip);
-  if (result && context.Rsp < traceStartSP_) {
-    LogF(ltInfo, "Warning: Might have encountered new fake API at %.8llx",
-         static_cast<unsigned long long>(context.Rip));
+  bool result = !tm_sect_r_.Contains(context.Rip);
+  if (result && context.Rsp < trace_start_sp_) {
+    LogF(kLogInfo, "Warning: Might have encountered new fake API at %.8llx",
+         static_cast<uint64_t>(context.Rip));
     result = false;
   }
 
   if (result) {
-    tracedAPI_ = context.Rip;
+    traced_api_ = context.Rip;
   }
   return result;
 }

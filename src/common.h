@@ -1,6 +1,8 @@
 // Magicmida - C++ port
 // Common helpers shared by all components.
-#pragma once
+// SPDX-License-Identifier: GPL-3.0-only
+#ifndef MAGICMIDA_COMMON_H_
+#define MAGICMIDA_COMMON_H_
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -31,6 +33,15 @@
 // named union `u` in both the Windows SDK and MinGW headers. Older SDKs had
 // an anonymous union; the current SDK used by MSVC/VS 2026 does not.
 #define MM_EVENT_FIELD(event, field) ((event).u.field)
+// Portable wrapper for the 1-byte packed binary layouts used by the PE and
+// BeaEngine structures.  The project does not need any other packing value.
+#if defined(_MSC_VER)
+#define MAGICMIDA_PACK_PUSH_1 __pragma(pack(push, 1))
+#define MAGICMIDA_PACK_POP __pragma(pack(pop))
+#else
+#define MAGICMIDA_PACK_PUSH_1 _Pragma("pack(push, 1)")
+#define MAGICMIDA_PACK_POP _Pragma("pack(pop)")
+#endif
 
 namespace magicmida {
 
@@ -38,12 +49,12 @@ namespace magicmida {
 // Logging
 // --------------------------------------------------------------------------
 
-enum class LogMsgType { Info, Good, Warning, Fatal };
+enum class LogMsgType { kInfo, kGood, kWarning, kFatal };
 
-constexpr LogMsgType ltInfo = LogMsgType::Info;
-constexpr LogMsgType ltGood = LogMsgType::Good;
-constexpr LogMsgType ltWarning = LogMsgType::Warning;
-constexpr LogMsgType ltFatal = LogMsgType::Fatal;
+constexpr LogMsgType kLogInfo = LogMsgType::kInfo;
+constexpr LogMsgType kLogGood = LogMsgType::kGood;
+constexpr LogMsgType kLogWarning = LogMsgType::kWarning;
+constexpr LogMsgType kLogFatal = LogMsgType::kFatal;
 
 using LogProc = std::function<void(LogMsgType, const std::string&)>;
 
@@ -91,7 +102,8 @@ std::wstring GetCurrentDir();
 std::wstring GetExecutablePath();
 bool EnableDebugPrivilege();
 
-// Builds "<dir><stem>U<ext>" like the original ChangeFileExt(FileName, 'U'+ext).
+// Builds "<dir><stem>U<ext>" like the original ChangeFileExt(FileName,
+// 'U'+ext).
 std::wstring MakeUnpackedFileName(const std::wstring& executable);
 
 // --------------------------------------------------------------------------
@@ -99,14 +111,15 @@ std::wstring MakeUnpackedFileName(const std::wstring& executable);
 // --------------------------------------------------------------------------
 
 struct MemoryRegion {
-  uintptr_t Address = 0;
-  size_t Size = 0;
+  uintptr_t address = 0;
+  size_t size = 0;
 
   MemoryRegion() = default;
-  MemoryRegion(uintptr_t address, size_t size) : Address(address), Size(size) {}
+  MemoryRegion(uintptr_t region_address, size_t region_size)
+      : address(region_address), size(region_size) {}
 
-  bool Contains(uintptr_t address) const {
-    return address >= Address && address < Address + Size;
+  bool Contains(uintptr_t candidate) const {
+    return candidate >= address && candidate < address + size;
   }
 };
 
@@ -118,8 +131,10 @@ struct MemoryRegion {
 // character is '?' is treated as a wildcard (matching the original code).
 // Returns the offset from `buf`, or 0 when the pattern was not found.
 
-uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf, size_t size);
-uint32_t FindStatic(const std::string& pattern, const uint8_t* buf, size_t size);
+uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf,
+                     size_t size);
+uint32_t FindStatic(const std::string& pattern, const uint8_t* buf,
+                    size_t size);
 
 // --------------------------------------------------------------------------
 // Misc Win32 helpers (ported from Utils.pas)
@@ -128,43 +143,23 @@ uint32_t FindStatic(const std::string& pattern, const uint8_t* buf, size_t size)
 std::string AccessViolationFlagToStr(uint8_t flag);
 uint32_t GetWindowsBuildNumber();
 uint32_t GetWindowsMajorVersion();
-uint32_t GetPETimestamp(const std::wstring& filename);
+uint32_t GetPeTimestamp(const std::wstring& filename);
 
 // NTSTATUS is not exposed by the lean public headers MinGW ships with.
 using NtStatus = LONG;
 
-extern "C" NtStatus __stdcall NtQueryInformationProcess(HANDLE processHandle,
-                                                        DWORD processInformationClass,
-                                                        PVOID processInformation,
-                                                        DWORD processInformationLength,
-                                                        PULONG returnLength);
-extern "C" NtStatus __stdcall NtQueryInformationThread(HANDLE threadHandle,
-                                                       DWORD threadInformationClass,
-                                                       PVOID threadInformation,
-                                                       DWORD threadInformationLength,
-                                                       PULONG returnLength);
 extern "C" LONG __stdcall RtlGetVersion(OSVERSIONINFOW* info);
 
 // Windows structs missing from the public SDK headers.
 struct ProcessBasicInformation {
-  NtStatus ExitStatus;
-  PVOID PebBaseAddress;
-  ULONG_PTR AffinityMask;
-  DWORD BasePriority;
-  ULONG_PTR UniqueProcessId;
-  ULONG_PTR InheritedFromUniqueProcessId;
+  NtStatus exit_status;
+  PVOID peb_base_address;
+  ULONG_PTR affinity_mask;
+  DWORD base_priority;
+  ULONG_PTR unique_process_id;
+  ULONG_PTR inherited_from_unique_process_id;
 };
-
-struct ThreadBasicInformation {
-  NtStatus ExitStatus;
-  PVOID TebBaseAddress;
-  HANDLE UniqueProcess;
-  HANDLE UniqueThread;
-  ULONG_PTR AffinityMask;
-  DWORD Priority;
-  DWORD BasePriority;
-};
-
-constexpr NtStatus STATUS_SUCCESS_VALUE = 0;
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_COMMON_H_

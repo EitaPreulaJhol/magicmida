@@ -134,7 +134,7 @@ set(SCYLLA_INJECTOR_SOURCES
     "${SCYLLA_DIR}/Scylla/Util.cpp"
     "${SCYLLA_DIR}/Scylla/VersionPatch.cpp")
 
-set(MAGICMIDA_CORE_SOURCES
+set(MAGICMIDA_CORE_FIRST_PARTY_SOURCES
     src/antidump_fix.cpp
     src/common.cpp
     src/debugger_core.cpp
@@ -149,15 +149,18 @@ set(MAGICMIDA_CORE_SOURCES
     src/scyllahide.cpp
     src/stream.cpp
     src/themida_common.cpp
-    src/tracer.cpp
-    ${SCYLLA_INJECTOR_SOURCES}
-    ${SCYLLA_DISTORM_SOURCES})
+    src/tracer.cpp)
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 4)
-  list(APPEND MAGICMIDA_CORE_SOURCES src/themida32.cpp)
+  list(APPEND MAGICMIDA_CORE_FIRST_PARTY_SOURCES src/themida32.cpp)
 else()
-  list(APPEND MAGICMIDA_CORE_SOURCES src/themida64.cpp)
+  list(APPEND MAGICMIDA_CORE_FIRST_PARTY_SOURCES src/themida64.cpp)
 endif()
+
+set(MAGICMIDA_CORE_SOURCES
+    ${MAGICMIDA_CORE_FIRST_PARTY_SOURCES}
+    ${SCYLLA_INJECTOR_SOURCES}
+    ${SCYLLA_DISTORM_SOURCES})
 
 add_library(magicmida_core OBJECT ${MAGICMIDA_CORE_SOURCES})
 target_include_directories(magicmida_core PUBLIC src ${SCYLLA_INCLUDE_DIRS})
@@ -197,6 +200,24 @@ else()
       gdi32
       advapi32
       shell32)
+endif()
+
+# Warnings are errors for first-party code.  ScyllaHide's vendored ntdll.h
+# redefines macros from the Windows headers, so that single translation unit
+# is exempt until the pinned snapshot is updated.
+set(MAGICMIDA_STRICT_SOURCES
+    ${MAGICMIDA_CORE_FIRST_PARTY_SOURCES}
+    src/gui_main.cpp)
+if(MSVC)
+  set_source_files_properties(${MAGICMIDA_STRICT_SOURCES}
+      PROPERTIES COMPILE_OPTIONS "/WX")
+  set_source_files_properties(src/scyllahide.cpp
+      PROPERTIES COMPILE_OPTIONS "/WX;/WX-")
+else()
+  set_source_files_properties(${MAGICMIDA_STRICT_SOURCES}
+      PROPERTIES COMPILE_OPTIONS "-Werror")
+  set_source_files_properties(src/scyllahide.cpp
+      PROPERTIES COMPILE_OPTIONS "-Werror;-Wno-error")
 endif()
 
 # ---------------------------------------------------------------------------

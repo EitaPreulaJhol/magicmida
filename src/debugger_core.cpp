@@ -1,20 +1,31 @@
 // Magicmida - C++ port
 // Debugger primitives: process creation, debug loop, HW/SW breakpoints.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "debugger_core.h"
+
+#include <algorithm>
+#include <cstring>
+#include <stdexcept>
+#include <string>
 
 #include "dumper.h"
 #include "pe_info.h"
 #include "scyllahide.h"
 #include "stream.h"
 
-#include <algorithm>
-#include <cstring>
-
 namespace magicmida {
+
+// Declared here rather than in common.h: the vendored ntdll.h used by
+// scyllahide.cpp already declares this symbol, and the two prototypes clash.
+extern "C" NtStatus __stdcall NtQueryInformationProcess(
+    HANDLE process_handle, DWORD process_information_class,
+    PVOID process_information, DWORD process_information_length,
+    PULONG return_length);
+
 namespace {
 
-constexpr uintptr_t OFFSET_IMAGEBASE = sizeof(void*) == 4 ? 8 : 16;
-constexpr uintptr_t OFFSET_SHIMDATA = sizeof(void*) == 4 ? 0x1E8 : 0x2D8;
+constexpr uintptr_t kOffsetImageBase = sizeof(void*) == 4 ? 8 : 16;
+constexpr uintptr_t kOffsetShimData = sizeof(void*) == 4 ? 0x1E8 : 0x2D8;
 
 std::wstring TrimRight(std::wstring value) {
   while (!value.empty() && (value.back() == L' ' || value.back() == L'\t' ||
@@ -34,7 +45,7 @@ DebuggerCore::DebuggerCore(const std::wstring& executable,
                            const std::wstring& parameters)
     : executable_(executable), parameters_(parameters) {}
 
-DebuggerCore::DebuggerCore(DWORD attachPid) : attachPid_(attachPid) {}
+DebuggerCore::DebuggerCore(DWORD attach_pid) : attach_pid_(attach_pid) {}
 
 // --------------------------------------------------------------------------
 // Debug loop
@@ -42,68 +53,71 @@ DebuggerCore::DebuggerCore(DWORD attachPid) : attachPid_(attachPid) {}
 
 void DebuggerCore::Run() {
   try {
-    if (!PEExecute()) {
-      throw std::runtime_error(Format("CreateProcess failed (error %lu)",
-                                      GetLastError()));
+    if (!PeExecute()) {
+      throw std::runtime_error(
+          Format("CreateProcess failed (error %lu)", GetLastError()));
     }
   } catch (const std::exception& error) {
-    LogF(ltFatal, "Creating the process failed: %s", error.what());
-    if (isDll_) {
+    LogF(kLogFatal, "Creating the process failed: %s", error.what());
+    if (is_dll_) {
       DeleteDllCopy();
     }
     CloseProcessHandles();
     return;
   }
 
-  bool processExited = false;
+  bool process_exited = false;
   bool stop = false;
   try {
     DWORD status = DBG_CONTINUE;
     for (;;) {
-      DEBUG_EVENT debugEvent{};
-      if (!WaitForDebugEvent(&debugEvent, 200)) {
+      DEBUG_EVENT debug_event{};
+      if (!WaitForDebugEvent(&debug_event, 200)) {
         const DWORD error = GetLastError();
         if (error == ERROR_SEM_TIMEOUT) {
           if (IsCancellationRequested()) {
-            Log(ltWarning, "Cancellation requested; stopping.");
+            Log(kLogWarning, "Cancellation requested; stopping.");
             stop = true;
             break;
           }
           continue;
         }
-        LogF(ltFatal, "OS Error: WaitForDebugEvent failed (error %lu)",
+        LogF(kLogFatal, "OS Error: WaitForDebugEvent failed (error %lu)",
              error);
         break;
       }
 
       if (IsCancellationRequested()) {
-        Log(ltWarning, "Cancellation requested; stopping.");
+        Log(kLogWarning, "Cancellation requested; stopping.");
         stop = true;
         break;
       }
 
-      currentThreadId_ = debugEvent.dwThreadId;
+      current_thread_id_ = debug_event.dwThreadId;
 
-      switch (debugEvent.dwDebugEventCode) {
+      switch (debug_event.dwDebugEventCode) {
         case EXCEPTION_DEBUG_EVENT: {
           status = DBG_EXCEPTION_NOT_HANDLED;
-          switch (MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionCode) {
+          switch (MM_EVENT_FIELD(debug_event, Exception)
+                      .ExceptionRecord.ExceptionCode) {
             case EXCEPTION_ACCESS_VIOLATION:
               status = OnAccessViolation(
-                  GetThread(debugEvent.dwThreadId),
-                  MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord);
+                  GetThread(debug_event.dwThreadId),
+                  MM_EVENT_FIELD(debug_event, Exception).ExceptionRecord);
               break;
 
             case EXCEPTION_BREAKPOINT:
-              if (softBPs_.find(reinterpret_cast<uintptr_t>(
-                      MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionAddress)) !=
-                  softBPs_.end()) {
-                status = OnSoftwareBreakpointEvent(debugEvent);
+              if (soft_bps_.find(reinterpret_cast<uintptr_t>(
+                      MM_EVENT_FIELD(debug_event, Exception)
+                          .ExceptionRecord.ExceptionAddress)) !=
+                  soft_bps_.end()) {
+                status = OnSoftwareBreakpointEvent(debug_event);
               } else {
                 OnUnsolicitedSoftwareBreakpoint(
-                    GetThread(debugEvent.dwThreadId),
+                    GetThread(debug_event.dwThreadId),
                     reinterpret_cast<uintptr_t>(
-                        MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionAddress));
+                        MM_EVENT_FIELD(debug_event, Exception)
+                            .ExceptionRecord.ExceptionAddress));
               }
               break;
 
@@ -112,21 +126,23 @@ void DebuggerCore::Run() {
               break;
 
             case EXCEPTION_SINGLE_STEP:
-              status = OnHardwareBreakpointEvent(debugEvent);
+              status = OnHardwareBreakpointEvent(debug_event);
               break;
 
             case DBG_CONTROL_C:
               break;
 
             default:
-              if (MM_EVENT_FIELD(debugEvent, Exception).dwFirstChance == 0) {
-                LogF(ltFatal, "dwFirstChance = 0");
+              if (MM_EVENT_FIELD(debug_event, Exception).dwFirstChance == 0) {
+                LogF(kLogFatal, "dwFirstChance = 0");
                 stop = true;
                 break;
               }
-              LogF(ltInfo, "Code 0x%.8X at 0x%p",
-                   MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionCode,
-                   MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionAddress);
+              LogF(kLogInfo, "Code 0x%.8X at 0x%p",
+                   MM_EVENT_FIELD(debug_event, Exception)
+                       .ExceptionRecord.ExceptionCode,
+                   MM_EVENT_FIELD(debug_event, Exception)
+                       .ExceptionRecord.ExceptionAddress);
               status = DBG_EXCEPTION_NOT_HANDLED;
               break;
           }
@@ -134,59 +150,60 @@ void DebuggerCore::Run() {
         }
 
         case CREATE_THREAD_DEBUG_EVENT:
-          status = OnCreateThreadDebugEvent(debugEvent);
+          status = OnCreateThreadDebugEvent(debug_event);
           break;
 
         case CREATE_PROCESS_DEBUG_EVENT:
-          status = OnCreateProcessDebugEvent(debugEvent);
+          status = OnCreateProcessDebugEvent(debug_event);
           break;
 
         case EXIT_THREAD_DEBUG_EVENT:
-          status = OnExitThreadDebugEvent(debugEvent);
+          status = OnExitThreadDebugEvent(debug_event);
           break;
 
         case EXIT_PROCESS_DEBUG_EVENT:
-          status = OnExitProcessDebugEvent(debugEvent);
-          ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId,
+          status = OnExitProcessDebugEvent(debug_event);
+          ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId,
                              status);
-          processExited = true;
+          process_exited = true;
           break;
 
         case LOAD_DLL_DEBUG_EVENT:
-          status = OnLoadDllDebugEvent(debugEvent);
+          status = OnLoadDllDebugEvent(debug_event);
           break;
 
         case UNLOAD_DLL_DEBUG_EVENT:
-          status = OnUnloadDllDebugEvent(debugEvent);
+          status = OnUnloadDllDebugEvent(debug_event);
           break;
 
         case OUTPUT_DEBUG_STRING_EVENT:
-          status = OnOutputDebugStringEvent(debugEvent);
+          status = OnOutputDebugStringEvent(debug_event);
           break;
 
         case RIP_EVENT:
-          status = OnRipEvent(debugEvent);
+          status = OnRipEvent(debug_event);
           break;
 
         default:
           break;
       }
 
-      if (processExited || stop) {
+      if (process_exited || stop) {
         break;
       }
 
-      ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, status);
+      ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId,
+                         status);
     }
   } catch (const std::exception& error) {
-    LogF(ltFatal, "Critical error in debug loop: %s", error.what());
+    LogF(kLogFatal, "Critical error in debug loop: %s", error.what());
   }
 
-  if (!processExited) {
+  if (!process_exited) {
     TerminateDebuggee();
   }
 
-  if (isDll_) {
+  if (is_dll_) {
     if (process_.hProcess != nullptr) {
       WaitForSingleObject(process_.hProcess, 5000);
     }
@@ -201,26 +218,26 @@ void DebuggerCore::TerminateDebuggee() {
     return;
   }
 
-  DWORD exitCode = 0;
-  if (GetExitCodeProcess(process_.hProcess, &exitCode) &&
-      exitCode == STILL_ACTIVE) {
-    Log(ltWarning, "Terminating the target process.");
+  DWORD exit_code = 0;
+  if (GetExitCodeProcess(process_.hProcess, &exit_code) &&
+      exit_code == STILL_ACTIVE) {
+    Log(kLogWarning, "Terminating the target process.");
     TerminateProcess(process_.hProcess, 1);
   }
 }
 
 void DebuggerCore::DeleteDllCopy() {
-  if (dllExecutable_.empty()) {
+  if (dll_executable_.empty()) {
     return;
   }
 
   // The copy may have been marked read-only or be briefly held by the
   // process/AV after termination; retry before giving up.
-  SetFileAttributesW(dllExecutable_.c_str(), FILE_ATTRIBUTE_NORMAL);
+  SetFileAttributesW(dll_executable_.c_str(), FILE_ATTRIBUTE_NORMAL);
   for (int attempt = 0; attempt < 10; ++attempt) {
-    if (DeleteFileW(dllExecutable_.c_str())) {
-      LogF(ltInfo, "Removed temporary DLL copy: %s",
-           WideToUtf8(dllExecutable_).c_str());
+    if (DeleteFileW(dll_executable_.c_str())) {
+      LogF(kLogInfo, "Removed temporary DLL copy: %s",
+           WideToUtf8(dll_executable_).c_str());
       return;
     }
     const DWORD error = GetLastError();
@@ -228,10 +245,10 @@ void DebuggerCore::DeleteDllCopy() {
       return;
     }
     if (attempt == 9) {
-      LogF(ltWarning,
+      LogF(kLogWarning,
            "Could not remove temporary DLL copy %s (error %lu); it will be "
            "deleted on the next DLL unpack.",
-           WideToUtf8(dllExecutable_).c_str(), error);
+           WideToUtf8(dll_executable_).c_str(), error);
       return;
     }
     Sleep(100);
@@ -274,16 +291,16 @@ void DebuggerCore::Detach() {
   }
 
   if (detached) {
-    Log(ltInfo, "Detached.");
+    Log(kLogInfo, "Detached.");
   } else {
-    Log(ltFatal, "Detaching failed.");
+    Log(kLogFatal, "Detaching failed.");
   }
 }
 
-HANDLE DebuggerCore::GetThread(DWORD threadId) {
-  const auto it = threads_.find(threadId);
+HANDLE DebuggerCore::GetThread(DWORD thread_id) {
+  const auto it = threads_.find(thread_id);
   if (it == threads_.end()) {
-    throw std::runtime_error(Format("Thread %lu not found", threadId));
+    throw std::runtime_error(Format("Thread %lu not found", thread_id));
   }
   return it->second;
 }
@@ -292,105 +309,107 @@ HANDLE DebuggerCore::GetThread(DWORD threadId) {
 // Debug events
 // --------------------------------------------------------------------------
 
-DWORD DebuggerCore::OnCreateThreadDebugEvent(DEBUG_EVENT& debugEvent) {
-  LogF(ltInfo, "[%.4d] Thread started (%p).", debugEvent.dwThreadId,
-       MM_EVENT_FIELD(debugEvent, CreateThread).lpStartAddress);
+DWORD DebuggerCore::OnCreateThreadDebugEvent(DEBUG_EVENT& debug_event) {
+  LogF(kLogInfo, "[%.4d] Thread started (%p).", debug_event.dwThreadId,
+       MM_EVENT_FIELD(debug_event, CreateThread).lpStartAddress);
 
-  const auto it = threads_.find(debugEvent.dwThreadId);
+  const auto it = threads_.find(debug_event.dwThreadId);
   if (it != threads_.end()) {
     CloseHandle(it->second);
   }
-  threads_[debugEvent.dwThreadId] = MM_EVENT_FIELD(debugEvent, CreateThread).hThread;
-  UpdateDR(MM_EVENT_FIELD(debugEvent, CreateThread).hThread);
+  threads_[debug_event.dwThreadId] =
+      MM_EVENT_FIELD(debug_event, CreateThread).hThread;
+  UpdateDr(MM_EVENT_FIELD(debug_event, CreateThread).hThread);
 
   return DBG_CONTINUE;
 }
 
-DWORD DebuggerCore::OnAccessViolation(HANDLE /*hThread*/,
-                                      const EXCEPTION_RECORD& exceptionRecord) {
-  LogF(ltInfo, "[%lu] Access violation at 0x%p: %s of 0x%p", currentThreadId_,
-       exceptionRecord.ExceptionAddress,
+DWORD DebuggerCore::OnAccessViolation(
+    HANDLE /*thread_handle*/, const EXCEPTION_RECORD& exception_record) {
+  LogF(kLogInfo, "[%lu] Access violation at 0x%p: %s of 0x%p",
+       current_thread_id_, exception_record.ExceptionAddress,
        AccessViolationFlagToStr(
-           static_cast<uint8_t>(exceptionRecord.ExceptionInformation[0]))
+           static_cast<uint8_t>(exception_record.ExceptionInformation[0]))
            .c_str(),
-       reinterpret_cast<void*>(exceptionRecord.ExceptionInformation[1]));
+       reinterpret_cast<void*>(exception_record.ExceptionInformation[1]));
   return DBG_EXCEPTION_NOT_HANDLED;
 }
 
-DWORD DebuggerCore::OnCreateProcessDebugEvent(DEBUG_EVENT& debugEvent) {
-  LogF(ltInfo, "Running on Windows build %u", GetWindowsBuildNumber());
-  LogF(ltInfo, "Debug session launched (PID: %lu, TID: %lu)",
-       debugEvent.dwProcessId, debugEvent.dwThreadId);
+DWORD DebuggerCore::OnCreateProcessDebugEvent(DEBUG_EVENT& debug_event) {
+  LogF(kLogInfo, "Running on Windows build %u", GetWindowsBuildNumber());
+  LogF(kLogInfo, "Debug session launched (PID: %lu, TID: %lu)",
+       debug_event.dwProcessId, debug_event.dwThreadId);
 
-  const HANDLE eventProcess =
-      MM_EVENT_FIELD(debugEvent, CreateProcessInfo).hProcess;
-  if (process_.hProcess != nullptr && process_.hProcess != eventProcess) {
+  const HANDLE event_process =
+      MM_EVENT_FIELD(debug_event, CreateProcessInfo).hProcess;
+  if (process_.hProcess != nullptr && process_.hProcess != event_process) {
     // CreateProcessW returned a handle to the same process; the debug event
     // handle replaces it for the rest of the session.
     CloseHandle(process_.hProcess);
   }
-  process_.hProcess = eventProcess;
-  process_.dwProcessId = debugEvent.dwProcessId;
+  process_.hProcess = event_process;
+  process_.dwProcessId = debug_event.dwProcessId;
 
   ProcessBasicInformation pbi{};
   NtQueryInformationProcess(process_.hProcess, 0, &pbi, sizeof(pbi), nullptr);
-  LogF(ltInfo, "PEB: %p", pbi.PebBaseAddress);
+  LogF(kLogInfo, "PEB: %p", pbi.peb_base_address);
 
-  uint8_t byteValue = 0;
+  uint8_t byte_value = 0;
   if (ReadProcessMemory(process_.hProcess,
-                        static_cast<uint8_t*>(pbi.PebBaseAddress) + 2,
-                        &byteValue, 1, nullptr)) {
-    if (byteValue == 1) {
-      Log(ltGood, "Patching PEB.BeingDebugged");
-      byteValue = 0;
+                        static_cast<uint8_t*>(pbi.peb_base_address) + 2,
+                        &byte_value, 1, nullptr)) {
+    if (byte_value == 1) {
+      Log(kLogGood, "Patching PEB.BeingDebugged");
+      byte_value = 0;
       WriteProcessMemory(process_.hProcess,
-                         static_cast<uint8_t*>(pbi.PebBaseAddress) + 2,
-                         &byteValue, 1, nullptr);
+                         static_cast<uint8_t*>(pbi.peb_base_address) + 2,
+                         &byte_value, 1, nullptr);
     }
   } else {
-    Log(ltFatal, "Reading PEB failed");
+    Log(kLogFatal, "Reading PEB failed");
   }
 
-  if (ReadProcessMemory(process_.hProcess,
-                        static_cast<uint8_t*>(pbi.PebBaseAddress) +
-                            OFFSET_IMAGEBASE,
-                        &imageBase_, sizeof(imageBase_), nullptr)) {
-    LogF(ltInfo, "Process Image Base: %p",
-         reinterpret_cast<void*>(imageBase_));
+  if (ReadProcessMemory(
+          process_.hProcess,
+          static_cast<uint8_t*>(pbi.peb_base_address) + kOffsetImageBase,
+          &image_base_, sizeof(image_base_), nullptr)) {
+    LogF(kLogInfo, "Process Image Base: %p",
+         reinterpret_cast<void*>(image_base_));
   } else {
     throw std::runtime_error("Reading process image base failed");
   }
 
-  uintptr_t shimData = 0;
-  if (ReadProcessMemory(process_.hProcess,
-                        static_cast<uint8_t*>(pbi.PebBaseAddress) +
-                            OFFSET_SHIMDATA,
-                        &shimData, sizeof(shimData), nullptr) &&
-      shimData != 0) {
-    shimData = 0;
-    if (WriteProcessMemory(process_.hProcess,
-                           static_cast<uint8_t*>(pbi.PebBaseAddress) +
-                               OFFSET_SHIMDATA,
-                           &shimData, sizeof(shimData), nullptr)) {
-      Log(ltInfo, "Cleared PEB.pShimData to prevent apphelp hooks");
+  uintptr_t shim_data = 0;
+  if (ReadProcessMemory(
+          process_.hProcess,
+          static_cast<uint8_t*>(pbi.peb_base_address) + kOffsetShimData,
+          &shim_data, sizeof(shim_data), nullptr) &&
+      shim_data != 0) {
+    shim_data = 0;
+    if (WriteProcessMemory(
+            process_.hProcess,
+            static_cast<uint8_t*>(pbi.peb_base_address) + kOffsetShimData,
+            &shim_data, sizeof(shim_data), nullptr)) {
+      Log(kLogInfo, "Cleared PEB.pShimData to prevent apphelp hooks");
     }
   }
 
-  threads_[debugEvent.dwThreadId] = MM_EVENT_FIELD(debugEvent, CreateProcessInfo).hThread;
+  threads_[debug_event.dwThreadId] =
+      MM_EVENT_FIELD(debug_event, CreateProcessInfo).hThread;
 
-  OnDebugStart(MM_EVENT_FIELD(debugEvent, CreateProcessInfo).hFile,
-               MM_EVENT_FIELD(debugEvent, CreateProcessInfo).hThread);
+  OnDebugStart(MM_EVENT_FIELD(debug_event, CreateProcessInfo).hFile,
+               MM_EVENT_FIELD(debug_event, CreateProcessInfo).hThread);
 
-  CloseHandle(MM_EVENT_FIELD(debugEvent, CreateProcessInfo).hFile);
+  CloseHandle(MM_EVENT_FIELD(debug_event, CreateProcessInfo).hFile);
   return DBG_CONTINUE;
 }
 
-DWORD DebuggerCore::OnExitThreadDebugEvent(DEBUG_EVENT& debugEvent) {
-  if (!hideThreadEnd_) {
-    LogF(ltInfo, "[%.4d] Thread ended (code %lu).", debugEvent.dwThreadId,
-         MM_EVENT_FIELD(debugEvent, ExitThread).dwExitCode);
+DWORD DebuggerCore::OnExitThreadDebugEvent(DEBUG_EVENT& debug_event) {
+  if (!hide_thread_end_) {
+    LogF(kLogInfo, "[%.4d] Thread ended (code %lu).", debug_event.dwThreadId,
+         MM_EVENT_FIELD(debug_event, ExitThread).dwExitCode);
   }
-  const auto it = threads_.find(debugEvent.dwThreadId);
+  const auto it = threads_.find(debug_event.dwThreadId);
   if (it != threads_.end()) {
     CloseHandle(it->second);
     threads_.erase(it);
@@ -398,16 +417,16 @@ DWORD DebuggerCore::OnExitThreadDebugEvent(DEBUG_EVENT& debugEvent) {
   return DBG_CONTINUE;
 }
 
-DWORD DebuggerCore::OnHardwareBreakpointEvent(DEBUG_EVENT& debugEvent) {
+DWORD DebuggerCore::OnHardwareBreakpointEvent(DEBUG_EVENT& debug_event) {
   const uintptr_t eip = reinterpret_cast<uintptr_t>(
-      MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionAddress);
-  HANDLE hThread = GetThread(debugEvent.dwThreadId);
+      MM_EVENT_FIELD(debug_event, Exception).ExceptionRecord.ExceptionAddress);
+  HANDLE thread_handle = GetThread(debug_event.dwThreadId);
 
   CONTEXT context{};
   context.ContextFlags =
       CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_DEBUG_REGISTERS;
-  if (!GetThreadContext(hThread, &context)) {
-    Log(ltFatal, "GetThreadContext failed");
+  if (!GetThreadContext(thread_handle, &context)) {
+    Log(kLogFatal, "GetThreadContext failed");
   }
 
   if ((((context.Dr6 >> 14) & 1) == 0) &&
@@ -427,35 +446,34 @@ DWORD DebuggerCore::OnHardwareBreakpointEvent(DEBUG_EVENT& debugEvent) {
         slot = 3;
         break;
       default:
-        LogF(ltFatal, "Unknown hwbp at %p (Dr6: %.8llX)",
-             reinterpret_cast<void*>(eip),
-             static_cast<unsigned long long>(context.Dr6));
+        LogF(kLogFatal, "Unknown hwbp at %p (Dr6: %.8llX)",
+             reinterpret_cast<void*>(eip), static_cast<uint64_t>(context.Dr6));
         return DBG_EXCEPTION_NOT_HANDLED;
     }
 
     Breakpoint bp = hw_[slot];
-    OnHardwareBreakpoint(hThread, bp.Address, context);
+    OnHardwareBreakpoint(thread_handle, bp.address, context);
 
     // Disable and step over.
-    if (bp.Type == HWBPType::Execute && DisableBreakpoint(eip)) {
-      UpdateDR(hThread);
+    if (bp.type == HwbpType::kExecute && DisableBreakpoint(eip)) {
+      UpdateDr(thread_handle);
       context.ContextFlags = CONTEXT_CONTROL;
       context.EFlags |= 0x100;
-      if (!SetThreadContext(hThread, &context)) {
-        Log(ltFatal, "SetThreadContext failed");
+      if (!SetThreadContext(thread_handle, &context)) {
+        Log(kLogFatal, "SetThreadContext failed");
       }
     }
 
     return DBG_CONTINUE;
   }
 
-  if (softBPReenable_ != 0) {
+  if (soft_bp_reenable_ != 0) {
     // Re-enable soft bp after stepping over it.
     uint8_t int3 = 0xCC;
     WriteProcessMemory(process_.hProcess,
-                       reinterpret_cast<void*>(softBPReenable_), &int3, 1,
+                       reinterpret_cast<void*>(soft_bp_reenable_), &int3, 1,
                        nullptr);
-    softBPReenable_ = 0;
+    soft_bp_reenable_ = 0;
     return DBG_CONTINUE;
   }
 
@@ -468,41 +486,43 @@ DWORD DebuggerCore::OnSinglestep(uintptr_t /*bpAddress*/) {
   return DBG_CONTINUE;
 }
 
-void DebuggerCore::OnDLLLoad(const std::wstring& fileName,
+void DebuggerCore::OnDllLoad(const std::wstring& file_name,
                              void* /*baseAddress*/) {
-  if (AsciiLowerCase(WideToUtf8(fileName)).find("aclayers.dll") !=
+  if (AsciiLowerCase(WideToUtf8(file_name)).find("aclayers.dll") !=
       std::string::npos) {
     throw std::runtime_error(
         "[FATAL] Compatibility mode screws up the unpacking process.");
   }
 }
 
-DWORD DebuggerCore::OnLoadDllDebugEvent(DEBUG_EVENT& debugEvent) {
-  void* imageName = nullptr;
+DWORD DebuggerCore::OnLoadDllDebugEvent(DEBUG_EVENT& debug_event) {
+  void* image_name = nullptr;
   wchar_t buffer[MAX_PATH + 1]{};
-  std::wstring dllName;
+  std::wstring dll_name;
 
-  if (!ReadProcessMemory(process_.hProcess, MM_EVENT_FIELD(debugEvent, LoadDll).lpImageName,
-                         &imageName, sizeof(imageName), nullptr) ||
-      imageName == nullptr ||
-      !ReadProcessMemory(process_.hProcess, imageName, buffer, sizeof(buffer),
+  if (!ReadProcessMemory(process_.hProcess,
+                         MM_EVENT_FIELD(debug_event, LoadDll).lpImageName,
+                         &image_name, sizeof(image_name), nullptr) ||
+      image_name == nullptr ||
+      !ReadProcessMemory(process_.hProcess, image_name, buffer, sizeof(buffer),
                          nullptr)) {
-    dllName = L"?";
+    dll_name = L"?";
   } else {
-    dllName = buffer;
+    dll_name = buffer;
   }
 
-  LogF(ltInfo, "[%.8llX] Loaded %s",
-       static_cast<unsigned long long>(
-           reinterpret_cast<uintptr_t>(MM_EVENT_FIELD(debugEvent, LoadDll).lpBaseOfDll)),
-       WideToUtf8(dllName).c_str());
-  OnDLLLoad(dllName, MM_EVENT_FIELD(debugEvent, LoadDll).lpBaseOfDll);
-  CloseHandle(MM_EVENT_FIELD(debugEvent, LoadDll).hFile);
+  LogF(kLogInfo, "[%.8llX] Loaded %s",
+       static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
+           MM_EVENT_FIELD(debug_event, LoadDll).lpBaseOfDll)),
+       WideToUtf8(dll_name).c_str());
+  OnDllLoad(dll_name, MM_EVENT_FIELD(debug_event, LoadDll).lpBaseOfDll);
+  CloseHandle(MM_EVENT_FIELD(debug_event, LoadDll).hFile);
   return DBG_CONTINUE;
 }
 
-DWORD DebuggerCore::OnExitProcessDebugEvent(DEBUG_EVENT& debugEvent) {
-  LogF(ltInfo, "Process ended (code %lu).", MM_EVENT_FIELD(debugEvent, ExitProcess).dwExitCode);
+DWORD DebuggerCore::OnExitProcessDebugEvent(DEBUG_EVENT& debug_event) {
+  LogF(kLogInfo, "Process ended (code %lu).",
+       MM_EVENT_FIELD(debug_event, ExitProcess).dwExitCode);
   return DBG_CONTINUE;
 }
 
@@ -510,26 +530,29 @@ DWORD DebuggerCore::OnUnloadDllDebugEvent(DEBUG_EVENT& /*debugEvent*/) {
   return DBG_CONTINUE;
 }
 
-void DebuggerCore::OnUnsolicitedSoftwareBreakpoint(HANDLE /*hThread*/,
+void DebuggerCore::OnUnsolicitedSoftwareBreakpoint(HANDLE /*thread_handle*/,
                                                    uintptr_t /*bpAddress*/) {
-  Log(ltInfo, "Unsolicited int3");
+  Log(kLogInfo, "Unsolicited int3");
 }
 
-DWORD DebuggerCore::OnOutputDebugStringEvent(DEBUG_EVENT& debugEvent) {
-  if (MM_EVENT_FIELD(debugEvent, DebugString).nDebugStringLength > 0 &&
-      MM_EVENT_FIELD(debugEvent, DebugString).nDebugStringLength < 256) {
+DWORD DebuggerCore::OnOutputDebugStringEvent(DEBUG_EVENT& debug_event) {
+  if (MM_EVENT_FIELD(debug_event, DebugString).nDebugStringLength > 0 &&
+      MM_EVENT_FIELD(debug_event, DebugString).nDebugStringLength < 256) {
     char buffer[257]{};
-    if (RPM(reinterpret_cast<uintptr_t>(MM_EVENT_FIELD(debugEvent, DebugString).lpDebugStringData),
-            buffer, MM_EVENT_FIELD(debugEvent, DebugString).nDebugStringLength)) {
-      buffer[MM_EVENT_FIELD(debugEvent, DebugString).nDebugStringLength] = '\0';
-      Log(ltInfo, std::string("[Debug Str] ") + buffer);
+    if (Rpm(reinterpret_cast<uintptr_t>(
+                MM_EVENT_FIELD(debug_event, DebugString).lpDebugStringData),
+            buffer,
+            MM_EVENT_FIELD(debug_event, DebugString).nDebugStringLength)) {
+      buffer[MM_EVENT_FIELD(debug_event, DebugString).nDebugStringLength] =
+          '\0';
+      Log(kLogInfo, std::string("[Debug Str] ") + buffer);
     }
   }
   return DBG_CONTINUE;
 }
 
 DWORD DebuggerCore::OnRipEvent(DEBUG_EVENT& /*debugEvent*/) {
-  Log(ltFatal, "SYSTEM ERROR");
+  Log(kLogFatal, "SYSTEM ERROR");
   return DBG_CONTINUE;
 }
 
@@ -537,51 +560,51 @@ DWORD DebuggerCore::OnRipEvent(DEBUG_EVENT& /*debugEvent*/) {
 // Process creation
 // --------------------------------------------------------------------------
 
-bool DebuggerCore::PEExecute() {
-  if (attachPid_ != 0) {
-    return DebugActiveProcess(attachPid_) != FALSE;
+bool DebuggerCore::PeExecute() {
+  if (attach_pid_ != 0) {
+    return DebugActiveProcess(attach_pid_) != FALSE;
   }
 
-  PEInspect();
+  PeInspect();
 
   // If Magicmida is executed with a different working dir, assume the user
   // wants that one as the working dir for the target.
-  std::wstring currentDir;
+  std::wstring current_dir;
   if (ExtractFilePath(GetExecutablePath()) !=
       IncludeTrailingPathDelimiter(GetCurrentDir())) {
-    currentDir = GetCurrentDir();
+    current_dir = GetCurrentDir();
   } else {
-    currentDir = ExtractFilePath(executable_);
-    if (!currentDir.empty() && currentDir.back() == L'\\') {
-      currentDir.pop_back();
+    current_dir = ExtractFilePath(executable_);
+    if (!current_dir.empty() && current_dir.back() == L'\\') {
+      current_dir.pop_back();
     }
   }
 
-  STARTUPINFOW startupInfo{};
-  startupInfo.cb = sizeof(startupInfo);
-  startupInfo.dwFlags = STARTF_USESHOWWINDOW;
-  startupInfo.wShowWindow = SW_SHOW;
+  STARTUPINFOW startup_info{};
+  startup_info.cb = sizeof(startup_info);
+  startup_info.dwFlags = STARTF_USESHOWWINDOW;
+  startup_info.wShowWindow = SW_SHOW;
 
-  std::wstring commandLine;
-  if (isDll_) {
-    MakeDLLExecutable();
-    LogF(ltInfo, "Debugging modified DLL: %s",
-         WideToUtf8(dllExecutable_).c_str());
-    commandLine = L"\"" + dllExecutable_ + L"\"";
+  std::wstring command_line;
+  if (is_dll_) {
+    MakeDllExecutable();
+    LogF(kLogInfo, "Debugging modified DLL: %s",
+         WideToUtf8(dll_executable_).c_str());
+    command_line = L"\"" + dll_executable_ + L"\"";
   } else {
-    commandLine = L"\"" + executable_ + L"\" " + TrimRight(parameters_);
+    command_line = L"\"" + executable_ + L"\" " + TrimRight(parameters_);
   }
 
   const DWORD flags = CREATE_DEFAULT_ERROR_MODE | CREATE_NEW_CONSOLE |
                       NORMAL_PRIORITY_CLASS | DEBUG_PROCESS |
                       DEBUG_ONLY_THIS_PROCESS;
 
-  PROCESS_INFORMATION processInfo{};
-  const BOOL created =
-      CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr, FALSE, flags,
-                     nullptr, currentDir.empty() ? nullptr : currentDir.c_str(),
-                     &startupInfo, &processInfo);
-  process_ = processInfo;
+  PROCESS_INFORMATION process_info{};
+  const BOOL created = CreateProcessW(
+      nullptr, command_line.data(), nullptr, nullptr, FALSE, flags, nullptr,
+      current_dir.empty() ? nullptr : current_dir.c_str(), &startup_info,
+      &process_info);
+  process_ = process_info;
   // The debug event supplies its own handle for the initial thread, so the
   // one returned by CreateProcessW is not needed.
   if (process_.hThread != nullptr) {
@@ -591,31 +614,32 @@ bool DebuggerCore::PEExecute() {
   return created != FALSE;
 }
 
-void DebuggerCore::PEInspect() {
-  FileStream file(executable_, FileStream::Mode::Read);
+void DebuggerCore::PeInspect() {
+  FileStream file(executable_, FileStream::Mode::kRead);
   uint8_t header[0x1000]{};
-  const int64_t fileSize = file.Size();
-  const size_t toRead =
-      std::min<size_t>(sizeof(header), static_cast<size_t>(fileSize));
-  if (toRead < sizeof(IMAGE_DOS_HEADER)) {
+  const int64_t file_size = file.Size();
+  const size_t to_read =
+      std::min<size_t>(sizeof(header), static_cast<size_t>(file_size));
+  if (to_read < sizeof(IMAGE_DOS_HEADER)) {
     throw std::runtime_error("Selected file is not a PE or is malformed");
   }
-  file.Read(header, toRead);
+  file.Read(header, to_read);
 
   const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(header);
   if (static_cast<uint32_t>(dos->e_lfanew) > 0xF00 ||
-      static_cast<size_t>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS) > toRead) {
+      static_cast<size_t>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS) > to_read) {
     throw std::runtime_error("Selected file is not a PE or is malformed");
   }
 
-  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(header + dos->e_lfanew);
+  const auto* nt =
+      reinterpret_cast<const IMAGE_NT_HEADERS*>(header + dos->e_lfanew);
   if (nt->Signature != IMAGE_NT_SIGNATURE) {
     throw std::runtime_error("PE file signature mismatch");
   }
 
-  constexpr WORD expectedMachine =
+  constexpr WORD kExpectedMachine =
       sizeof(void*) == 4 ? IMAGE_FILE_MACHINE_I386 : IMAGE_FILE_MACHINE_AMD64;
-  if (nt->FileHeader.Machine != expectedMachine) {
+  if (nt->FileHeader.Machine != kExpectedMachine) {
     throw std::runtime_error(
         sizeof(void*) == 4
             ? "File is for the wrong architecture, please use the 64-bit "
@@ -624,10 +648,10 @@ void DebuggerCore::PEInspect() {
               "version of Magicmida.");
   }
 
-  isDll_ = (nt->FileHeader.Characteristics & IMAGE_FILE_DLL) != 0;
+  is_dll_ = (nt->FileHeader.Characteristics & IMAGE_FILE_DLL) != 0;
 }
 
-void DebuggerCore::MakeDLLExecutable() {
+void DebuggerCore::MakeDllExecutable() {
   // These stubs set up the stack/parameters to stage a call to the DLL
   // entrypoint. Older Themida versions didn't strictly require it, newer ones
   // crash without it.
@@ -638,93 +662,92 @@ void DebuggerCore::MakeDLLExecutable() {
       0x00, 0x00, 0x45, 0x31, 0xC0, 0xE8, 0x00, 0x00, 0x00, 0x00,
   };
 #else
-  constexpr uint8_t kStub[] = {0x8B, 0x40, 0x08, 0x6A, 0x00, 0x6A,
-                               0x01, 0x50, 0xE8, 0x00, 0x00, 0x00,
-                               0x00};
+  constexpr uint8_t kStub[] = {0x8B, 0x40, 0x08, 0x6A, 0x00, 0x6A, 0x01,
+                               0x50, 0xE8, 0x00, 0x00, 0x00, 0x00};
 #endif
   constexpr size_t kStubSize = sizeof(kStub);
 
-  dllExecutable_ = executable_ + L"MM.exe";
+  dll_executable_ = executable_ + L"MM.exe";
   // Remove a leftover copy from an interrupted previous run before writing
   // the new one.
   DeleteDllCopy();
-  if (!CopyFileW(executable_.c_str(), dllExecutable_.c_str(), FALSE)) {
+  if (!CopyFileW(executable_.c_str(), dll_executable_.c_str(), FALSE)) {
     const DWORD error = GetLastError();
     throw std::runtime_error(Format("Copying DLL to %s failed (error %lu)",
-                                    WideToUtf8(dllExecutable_).c_str(),
+                                    WideToUtf8(dll_executable_).c_str(),
                                     error));
   }
 
-  FileStream file(dllExecutable_, FileStream::Mode::ReadWrite);
+  FileStream file(dll_executable_, FileStream::Mode::kReadWrite);
   uint8_t header[0x1000]{};
-  const size_t toRead = static_cast<size_t>(
+  const size_t to_read = static_cast<size_t>(
       std::min<int64_t>(static_cast<int64_t>(sizeof(header)), file.Size()));
-  if (toRead < sizeof(IMAGE_DOS_HEADER)) {
+  if (to_read < sizeof(IMAGE_DOS_HEADER)) {
     throw std::runtime_error("Copy of the DLL is too small");
   }
-  file.Read(header, toRead);
+  file.Read(header, to_read);
 
-  const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(header);
-  if (static_cast<uint32_t>(dosHeader->e_lfanew) > 0xF00 ||
-      static_cast<size_t>(dosHeader->e_lfanew) + sizeof(IMAGE_NT_HEADERS) >
-          toRead) {
+  const auto* dos_header = reinterpret_cast<const IMAGE_DOS_HEADER*>(header);
+  if (static_cast<uint32_t>(dos_header->e_lfanew) > 0xF00 ||
+      static_cast<size_t>(dos_header->e_lfanew) + sizeof(IMAGE_NT_HEADERS) >
+          to_read) {
     throw std::runtime_error("Copy of the DLL has a malformed PE header");
   }
 
-  auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(header + dosHeader->e_lfanew);
+  auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(header + dos_header->e_lfanew);
   nt->FileHeader.Characteristics &= ~IMAGE_FILE_DLL;
-  file.Seek(dosHeader->e_lfanew + 22, Stream::Origin::Begin);
+  file.Seek(dos_header->e_lfanew + 22, Stream::Origin::kBegin);
   file.Write(&nt->FileHeader.Characteristics,
              sizeof(nt->FileHeader.Characteristics));
 
-  const uint64_t optionalHeaderPos = static_cast<uint64_t>(file.Position());
+  const uint64_t optional_header_pos = static_cast<uint64_t>(file.Position());
 
   if ((nt->OptionalHeader.DllCharacteristics & 0x80) != 0) {
     // Disable "Code Integrity Image".
     nt->OptionalHeader.DllCharacteristics &= ~0x80;
     file.Seek(offsetof(IMAGE_OPTIONAL_HEADER, DllCharacteristics),
-              Stream::Origin::Current);
+              Stream::Origin::kCurrent);
     file.Write(&nt->OptionalHeader.DllCharacteristics,
                sizeof(nt->OptionalHeader.DllCharacteristics));
   }
 
-  PEHeader pe(header, toRead);
-  PESection* epSection = pe.GetSectionByVA(nt->OptionalHeader.AddressOfEntryPoint);
-  if (epSection == nullptr || epSection->Header.SizeOfRawData < kStubSize) {
+  PeHeader pe(header, to_read);
+  PeSection* ep_section =
+      pe.GetSectionByVa(nt->OptionalHeader.AddressOfEntryPoint);
+  if (ep_section == nullptr || ep_section->header.SizeOfRawData < kStubSize) {
     throw std::runtime_error("Not enough room in EP section");
   }
 
-  file.Seek(epSection->Header.PointerToRawData +
-                epSection->Header.SizeOfRawData - kStubSize,
-            Stream::Origin::Begin);
+  file.Seek(ep_section->header.PointerToRawData +
+                ep_section->header.SizeOfRawData - kStubSize,
+            Stream::Origin::kBegin);
 
   uint8_t current[kStubSize]{};
   file.Read(current, sizeof(current));
   for (uint8_t value : current) {
     if (value != 0) {
-      Log(ltFatal, "Not enough room in EP section");
+      Log(kLogFatal, "Not enough room in EP section");
       return;
     }
   }
 
   std::memcpy(current, kStub, kStubSize);
-  const uint32_t newEntryPoint = epSection->Header.VirtualAddress +
-                                 epSection->Header.SizeOfRawData - kStubSize;
-  *reinterpret_cast<int32_t*>(current + kStubSize - 4) =
-      static_cast<int32_t>(nt->OptionalHeader.AddressOfEntryPoint -
-                           (newEntryPoint + kStubSize));
+  const uint32_t new_entry_point = ep_section->header.VirtualAddress +
+                                   ep_section->header.SizeOfRawData - kStubSize;
+  *reinterpret_cast<int32_t*>(current + kStubSize - 4) = static_cast<int32_t>(
+      nt->OptionalHeader.AddressOfEntryPoint - (new_entry_point + kStubSize));
 
-  file.Seek(-static_cast<int64_t>(kStubSize), Stream::Origin::Current);
+  file.Seek(-static_cast<int64_t>(kStubSize), Stream::Origin::kCurrent);
   file.Write(current, sizeof(current));
 
-  nt->OptionalHeader.AddressOfEntryPoint = newEntryPoint;
-  file.Seek(optionalHeaderPos +
+  nt->OptionalHeader.AddressOfEntryPoint = new_entry_point;
+  file.Seek(optional_header_pos +
                 offsetof(IMAGE_OPTIONAL_HEADER, AddressOfEntryPoint),
-            Stream::Origin::Begin);
+            Stream::Origin::kBegin);
   file.Write(&nt->OptionalHeader.AddressOfEntryPoint,
              sizeof(nt->OptionalHeader.AddressOfEntryPoint));
 
-  Dumper::SwitchSxSManifestType(file, pe, 2, 1);
+  Dumper::SwitchSxsManifestType(file, pe, 2, 1);
 }
 
 // --------------------------------------------------------------------------
@@ -739,31 +762,30 @@ void DebuggerCore::FetchMemoryRegions() {
   while (VirtualQueryEx(process_.hProcess, reinterpret_cast<void*>(address),
                         &mbi, sizeof(mbi)) != 0 &&
          address + mbi.RegionSize > address) {
-    memRegions_.emplace_back(reinterpret_cast<uintptr_t>(mbi.BaseAddress),
-                             mbi.RegionSize);
+    mem_regions_.emplace_back(reinterpret_cast<uintptr_t>(mbi.BaseAddress),
+                              mbi.RegionSize);
     address += mbi.RegionSize;
   }
 }
 
-bool DebuggerCore::RPM(uintptr_t address, void* buf, size_t bufSize) {
-  return ReadProcessMemory(process_.hProcess,
-                           reinterpret_cast<void*>(address), buf, bufSize,
-                           nullptr) != FALSE;
+bool DebuggerCore::Rpm(uintptr_t address, void* buf, size_t buf_size) {
+  return ReadProcessMemory(process_.hProcess, reinterpret_cast<void*>(address),
+                           buf, buf_size, nullptr) != FALSE;
 }
 
-bool DebuggerCore::IsHWBreakpoint(uintptr_t address) {
-  return hw_[0].Address == address || hw_[1].Address == address ||
-         hw_[2].Address == address || hw_[3].Address == address;
+bool DebuggerCore::IsHwBreakpoint(uintptr_t address) {
+  return hw_[0].address == address || hw_[1].address == address ||
+         hw_[2].address == address || hw_[3].address == address;
 }
 
-void DebuggerCore::SetBreakpoint(uintptr_t address, HWBPType type,
-                                 bool refreshContexts) {
+void DebuggerCore::SetBreakpoint(uintptr_t address, HwbpType type,
+                                 bool refresh_contexts) {
   for (Breakpoint& breakpoint : hw_) {
-    if (breakpoint.Address == 0) {
+    if (breakpoint.address == 0) {
       breakpoint.Change(address, type);
-      if (refreshContexts) {
+      if (refresh_contexts) {
         for (const auto& entry : threads_) {
-          UpdateDR(entry.second);
+          UpdateDr(entry.second);
         }
       }
       return;
@@ -775,8 +797,8 @@ void DebuggerCore::SetBreakpoint(uintptr_t address, HWBPType type,
 
 bool DebuggerCore::DisableBreakpoint(uintptr_t address) {
   for (Breakpoint& breakpoint : hw_) {
-    if (breakpoint.Address == address) {
-      breakpoint.Disabled = true;
+    if (breakpoint.address == address) {
+      breakpoint.disabled = true;
       return true;
     }
   }
@@ -784,81 +806,81 @@ bool DebuggerCore::DisableBreakpoint(uintptr_t address) {
 }
 
 void DebuggerCore::EnableBreakpoints() {
-  if (!hw_[0].Disabled && !hw_[1].Disabled && !hw_[2].Disabled &&
-      !hw_[3].Disabled) {
+  if (!hw_[0].disabled && !hw_[1].disabled && !hw_[2].disabled &&
+      !hw_[3].disabled) {
     return;
   }
 
   for (Breakpoint& breakpoint : hw_) {
-    breakpoint.Disabled = false;
+    breakpoint.disabled = false;
   }
   for (const auto& entry : threads_) {
-    UpdateDR(entry.second);
+    UpdateDr(entry.second);
   }
 }
 
 void DebuggerCore::ResetBreakpoint(uintptr_t address) {
   for (Breakpoint& breakpoint : hw_) {
-    if (breakpoint.Address == address) {
-      breakpoint.Address = 0;
+    if (breakpoint.address == address) {
+      breakpoint.address = 0;
     }
   }
   for (const auto& entry : threads_) {
-    UpdateDR(entry.second);
+    UpdateDr(entry.second);
   }
 }
 
 void DebuggerCore::ApplyDebugRegisters(CONTEXT& context) {
   ULONG_PTR mask = 0;
 
-  context.Dr0 = hw_[0].Address;
+  context.Dr0 = hw_[0].address;
   if (hw_[0].IsSet()) {
     mask = 1;
   }
 
-  context.Dr1 = hw_[1].Address;
+  context.Dr1 = hw_[1].address;
   if (hw_[1].IsSet()) {
     mask |= static_cast<ULONG_PTR>(1) << 2;
   }
 
-  context.Dr2 = hw_[2].Address;
+  context.Dr2 = hw_[2].address;
   if (hw_[2].IsSet()) {
     mask |= static_cast<ULONG_PTR>(1) << 4;
   }
 
-  context.Dr3 = hw_[3].Address;
+  context.Dr3 = hw_[3].address;
   if (hw_[3].IsSet()) {
     mask |= static_cast<ULONG_PTR>(1) << 6;
   }
 
   context.Dr6 &= ~static_cast<decltype(context.Dr6)>(0x4000);
   context.Dr7 = static_cast<decltype(context.Dr7)>(
-      mask | (static_cast<uint64_t>(hw_[0].Type) << 16) |
-      (static_cast<uint64_t>(hw_[1].Type) << 20) |
-      (static_cast<uint64_t>(hw_[2].Type) << 24) |
-      (static_cast<uint64_t>(hw_[3].Type) << 28));
+      mask | (static_cast<uint64_t>(hw_[0].type) << 16) |
+      (static_cast<uint64_t>(hw_[1].type) << 20) |
+      (static_cast<uint64_t>(hw_[2].type) << 24) |
+      (static_cast<uint64_t>(hw_[3].type) << 28));
 }
 
-void DebuggerCore::UpdateDR(HANDLE thread) {
+void DebuggerCore::UpdateDr(HANDLE thread) {
   CONTEXT context{};
   context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
   if (GetThreadContext(thread, &context)) {
     ApplyDebugRegisters(context);
     SetThreadContext(thread, &context);
   } else {
-    Log(ltFatal, "GetThreadContext failed");
+    Log(kLogFatal, "GetThreadContext failed");
   }
 }
 
 bool DebuggerCore::WriteByte(uintptr_t address, uint8_t value) {
-  DWORD oldProtect = 0;
+  DWORD old_protect = 0;
   const BOOL result =
       VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(address), 1,
-                       PAGE_EXECUTE_READWRITE, &oldProtect) &&
-      WriteProcessMemory(process_.hProcess,
-                         reinterpret_cast<void*>(address), &value, 1, nullptr) &&
+                       PAGE_EXECUTE_READWRITE, &old_protect) &&
+      WriteProcessMemory(process_.hProcess, reinterpret_cast<void*>(address),
+                         &value, 1, nullptr) &&
       VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(address), 1,
-                       oldProtect, &oldProtect);
+                       old_protect, &old_protect);
   FlushInstructionCache(process_.hProcess, reinterpret_cast<void*>(address), 1);
   return result != FALSE;
 }
@@ -867,85 +889,81 @@ bool DebuggerCore::WriteByte(uintptr_t address, uint8_t value) {
 // Software breakpoints
 // --------------------------------------------------------------------------
 
-DWORD DebuggerCore::OnSoftwareBreakpointEvent(DEBUG_EVENT& debugEvent) {
+DWORD DebuggerCore::OnSoftwareBreakpointEvent(DEBUG_EVENT& debug_event) {
   const uintptr_t eip = reinterpret_cast<uintptr_t>(
-      MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionAddress);
-  HANDLE hThread = GetThread(debugEvent.dwThreadId);
+      MM_EVENT_FIELD(debug_event, Exception).ExceptionRecord.ExceptionAddress);
+  HANDLE thread_handle = GetThread(debug_event.dwThreadId);
 
   CONTEXT context{};
   context.ContextFlags = CONTEXT_CONTROL;
-  GetThreadContext(hThread, &context);
+  GetThreadContext(thread_handle, &context);
 #if defined(_WIN64)
   --context.Rip;
 #else
   --context.Eip;
 #endif
-  SetThreadContext(hThread, &context);
+  SetThreadContext(thread_handle, &context);
 
-  const uint8_t original = softBPs_.at(eip);
+  const uint8_t original = soft_bps_.at(eip);
   // Before OnSoftwareBreakpoint (child implementations may write to EIP!).
   if (!WriteByte(eip, original)) {
-    Log(ltFatal, "Restoring original byte failed");
+    Log(kLogFatal, "Restoring original byte failed");
   }
 
-  const SoftBPAction action = OnSoftwareBreakpoint(hThread, eip);
+  const SoftBpAction action = OnSoftwareBreakpoint(thread_handle, eip);
 
-  if (action == SoftBPAction::ClearContinue) {
-    softBPs_.erase(eip);
-  } else if (action == SoftBPAction::KeepContinue) {
+  if (action == SoftBpAction::kClearContinue) {
+    soft_bps_.erase(eip);
+  } else if (action == SoftBpAction::kKeepContinue) {
     // Keep, single step.
 #if defined(_WIN64)
-    softBPReenable_ = context.Rip;
+    soft_bp_reenable_ = context.Rip;
 #else
-    softBPReenable_ = context.Eip;
+    soft_bp_reenable_ = context.Eip;
 #endif
     context.EFlags |= 0x100;
-    SetThreadContext(hThread, &context);
-  } else if (action == SoftBPAction::KeepContinueNoStep) {
+    SetThreadContext(thread_handle, &context);
+  } else if (action == SoftBpAction::kKeepContinueNoStep) {
     if (!WriteByte(eip, 0xCC)) {
-      Log(ltFatal, "KeepContinueNoStep failed");
+      Log(kLogFatal, "KeepContinueNoStep failed");
     }
   }
 
   return DBG_CONTINUE;
 }
 
-void DebuggerCore::SetSoftBP(uintptr_t address) {
+void DebuggerCore::SetSoftBp(uintptr_t address) {
   uint8_t original = 0;
-  if (!ReadProcessMemory(process_.hProcess,
-                         reinterpret_cast<void*>(address), &original, 1,
-                         nullptr)) {
-    throw std::runtime_error(
-        Format("Read for soft bp at %llX failed",
-               static_cast<unsigned long long>(address)));
+  if (!ReadProcessMemory(process_.hProcess, reinterpret_cast<void*>(address),
+                         &original, 1, nullptr)) {
+    throw std::runtime_error(Format("Read for soft bp at %llX failed",
+                                    static_cast<uint64_t>(address)));
   }
 
-  const auto it = softBPs_.find(address);
-  if (it != softBPs_.end()) {
+  const auto it = soft_bps_.find(address);
+  if (it != soft_bps_.end()) {
     if (original != 0xCC) {
-      LogF(ltFatal, "Soft bp inconsistency at %llX!",
-           static_cast<unsigned long long>(address));
+      LogF(kLogFatal, "Soft bp inconsistency at %llX!",
+           static_cast<uint64_t>(address));
     }
     return;
   }
 
-  softBPs_[address] = original;
+  soft_bps_[address] = original;
 
   if (!WriteByte(address, 0xCC)) {
-    throw std::runtime_error(
-        Format("Write for soft bp at %llX failed",
-               static_cast<unsigned long long>(address)));
+    throw std::runtime_error(Format("Write for soft bp at %llX failed",
+                                    static_cast<uint64_t>(address)));
   }
 
-  FlushInstructionCache(process_.hProcess,
-                        reinterpret_cast<void*>(address), 1);
+  FlushInstructionCache(process_.hProcess, reinterpret_cast<void*>(address), 1);
 }
 
-void DebuggerCore::SoftBPClear() {
-  for (const auto& entry : softBPs_) {
+void DebuggerCore::SoftBpClear() {
+  for (const auto& entry : soft_bps_) {
     WriteByte(entry.first, entry.second);
   }
-  softBPs_.clear();
+  soft_bps_.clear();
 }
 
 }  // namespace magicmida

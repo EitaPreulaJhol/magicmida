@@ -1,6 +1,8 @@
 // Magicmida - C++ port
 // Rebuilds base relocation tables for unpacked DLLs.
-#pragma once
+// SPDX-License-Identifier: GPL-3.0-only
+#ifndef MAGICMIDA_RELOC_FIX_H_
+#define MAGICMIDA_RELOC_FIX_H_
 
 #include <cstdint>
 #include <string>
@@ -13,6 +15,8 @@ namespace magicmida {
 // moved to `dumpBase` because the dumped bytes contain addresses relative to
 // it. Existing relocation entries are preserved and merged with the
 // reconstructed ones. Returns true when a relocation table was written.
-bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase);
+bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base);
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_RELOC_FIX_H_

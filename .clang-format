@@ -1,0 +1,9 @@
+# Google C++ style, pinned for the project.
+BasedOnStyle: Google
+Standard: c++17
+ColumnLimit: 80
+AllowShortFunctionsOnASingleLine: Inline
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Regroup
+SortIncludes: CaseInsensitive

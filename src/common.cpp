@@ -1,31 +1,50 @@
 // Magicmida - C++ port
 // Common helpers shared by all components.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "common.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace magicmida {
 namespace {
 
-LogProc g_log;
-StatusProc g_statusReporter;
-HANDLE g_cancelEvent = nullptr;
+// Function-local pointers to heap objects that are intentionally never
+// destroyed: static objects with non-trivial destructors are not allowed.
+LogProc& LogSink() {
+  static LogProc* sink = new LogProc;
+  return *sink;
+}
+
+StatusProc& StatusSink() {
+  static StatusProc* sink = new StatusProc;
+  return *sink;
+}
+
+HANDLE& CancellationEvent() {
+  static HANDLE event = nullptr;
+  return event;
+}
 
 void DefaultLog(LogMsgType type, const std::string& msg) {
   const char* prefix = "[Info] ";
   switch (type) {
-    case LogMsgType::Good:
+    case LogMsgType::kGood:
       prefix = "[Good] ";
       break;
-    case LogMsgType::Warning:
+    case LogMsgType::kWarning:
       prefix = "[Warning] ";
       break;
-    case LogMsgType::Fatal:
+    case LogMsgType::kFatal:
       prefix = "[Fatal] ";
       break;
-    case LogMsgType::Info:
+    case LogMsgType::kInfo:
     default:
       break;
   }
@@ -53,31 +72,31 @@ bool IsPathDelimiter(wchar_t c) {
 // --------------------------------------------------------------------------
 
 void SetLog(LogProc proc) {
-  g_log = std::move(proc);
+  LogSink() = std::move(proc);
 }
 
 void SetStatusReporter(StatusProc proc) {
-  g_statusReporter = std::move(proc);
+  StatusSink() = std::move(proc);
 }
 
 void ReportStatus(const std::string& text) {
-  if (g_statusReporter) {
-    g_statusReporter(text);
+  if (StatusSink()) {
+    StatusSink()(text);
   }
 }
 
 void SetCancellationEvent(HANDLE event) {
-  g_cancelEvent = event;
+  CancellationEvent() = event;
 }
 
 bool IsCancellationRequested() {
-  return g_cancelEvent != nullptr &&
-         WaitForSingleObject(g_cancelEvent, 0) == WAIT_OBJECT_0;
+  return CancellationEvent() != nullptr &&
+         WaitForSingleObject(CancellationEvent(), 0) == WAIT_OBJECT_0;
 }
 
 void Log(LogMsgType type, const std::string& msg) {
-  if (g_log) {
-    g_log(type, msg);
+  if (LogSink()) {
+    LogSink()(type, msg);
   } else {
     DefaultLog(type, msg);
   }
@@ -156,8 +175,8 @@ std::wstring Utf8ToWide(const std::string& value) {
   if (value.empty()) {
     return {};
   }
-  const int length = MultiByteToWideChar(CP_UTF8, 0, value.data(),
-                                         static_cast<int>(value.size()), nullptr, 0);
+  const int length = MultiByteToWideChar(
+      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
   if (length <= 0) {
     return {};
   }
@@ -172,8 +191,8 @@ std::string WideToUtf8(const std::wstring& value) {
     return {};
   }
   const int length = WideCharToMultiByte(CP_UTF8, 0, value.data(),
-                                         static_cast<int>(value.size()), nullptr, 0,
-                                         nullptr, nullptr);
+                                         static_cast<int>(value.size()),
+                                         nullptr, 0, nullptr, nullptr);
   if (length <= 0) {
     return {};
   }
@@ -252,8 +271,8 @@ std::wstring GetCurrentDir() {
 std::wstring GetExecutablePath() {
   std::wstring result(MAX_PATH, L'\0');
   for (;;) {
-    const DWORD written =
-        GetModuleFileNameW(nullptr, result.data(), static_cast<DWORD>(result.size()));
+    const DWORD written = GetModuleFileNameW(nullptr, result.data(),
+                                             static_cast<DWORD>(result.size()));
     if (written == 0) {
       return {};
     }
@@ -267,7 +286,8 @@ std::wstring GetExecutablePath() {
 
 std::wstring MakeUnpackedFileName(const std::wstring& executable) {
   return ExtractFilePath(executable) +
-         ChangeFileExt(ExtractFileName(executable), L"U" + ExtractFileExt(executable));
+         ChangeFileExt(ExtractFileName(executable),
+                       L"U" + ExtractFileExt(executable));
 }
 
 // --------------------------------------------------------------------------
@@ -297,8 +317,8 @@ ParsedPattern ParsePattern(const std::string& pattern) {
     const int high = HexDigit(hi);
     const int low = HexDigit(lo);
     if (high < 0 || low < 0) {
-      throw std::runtime_error(Format("Invalid pattern byte at index %zu: '%c%c'",
-                                      i * 2, hi, lo));
+      throw std::runtime_error(
+          Format("Invalid pattern byte at index %zu: '%c%c'", i * 2, hi, lo));
     }
     result.bytes[i] = static_cast<uint8_t>((high << 4) | low);
   }
@@ -307,7 +327,8 @@ ParsedPattern ParsePattern(const std::string& pattern) {
 
 }  // namespace
 
-uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf, size_t size) {
+uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf,
+                     size_t size) {
   if (buf == nullptr || size == 0) {
     return 0;
   }
@@ -334,7 +355,8 @@ uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf, size_t size
   return 0;
 }
 
-uint32_t FindStatic(const std::string& pattern, const uint8_t* buf, size_t size) {
+uint32_t FindStatic(const std::string& pattern, const uint8_t* buf,
+                    size_t size) {
   if (buf == nullptr || size == 0) {
     return 0;
   }
@@ -384,9 +406,10 @@ uint32_t GetWindowsMajorVersion() {
   return info.dwMajorVersion;
 }
 
-uint32_t GetPETimestamp(const std::wstring& filename) {
-  HANDLE file = CreateFileW(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+uint32_t GetPeTimestamp(const std::wstring& filename) {
+  HANDLE file =
+      CreateFileW(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) {
     return 0;
   }
@@ -407,7 +430,8 @@ uint32_t GetPETimestamp(const std::wstring& filename) {
     return 0;
   }
 
-  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(header + dos->e_lfanew);
+  const auto* nt =
+      reinterpret_cast<const IMAGE_NT_HEADERS*>(header + dos->e_lfanew);
   return nt->FileHeader.TimeDateStamp;
 }
 
@@ -430,9 +454,8 @@ bool EnableDebugPrivilege() {
   privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
   SetLastError(ERROR_SUCCESS);
-  const BOOL adjusted =
-      AdjustTokenPrivileges(token, FALSE, &privileges, sizeof(privileges),
-                            nullptr, nullptr);
+  const BOOL adjusted = AdjustTokenPrivileges(
+      token, FALSE, &privileges, sizeof(privileges), nullptr, nullptr);
   const DWORD error = GetLastError();
   CloseHandle(token);
   return adjusted != FALSE && error == ERROR_SUCCESS;

@@ -1,107 +1,112 @@
 // Magicmida - C++ port
 // 32-bit Themida/WinLicense unpacking logic (ported from Themida.pas).
-#pragma once
-
-#include "themida_common.h"
+// SPDX-License-Identifier: GPL-3.0-only
+#ifndef MAGICMIDA_THEMIDA32_H_
+#define MAGICMIDA_THEMIDA32_H_
 
 #include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
 
+#include "themida_common.h"
+
 namespace magicmida {
 
 class ThemidaDebugger : public ThemidaCommon {
  public:
-  ThemidaDebugger(const std::wstring& executable, const std::wstring& parameters,
-                  bool createData, bool useScyllaHide = true,
-                  bool fixRelocations = false);
+  ThemidaDebugger(const std::wstring& executable,
+                  const std::wstring& parameters, bool create_data,
+                  bool use_scylla_hide = true, bool fix_relocations = false);
   ~ThemidaDebugger() override = default;
 
  protected:
-  bool TraceIsAtAPI(Tracer& tracer, CONTEXT& context) override;
+  bool TraceIsAtApi(Tracer& tracer, CONTEXT& context) override;
 
-  void OnDebugStart(HANDLE& hPE, HANDLE hThread) override;
-  DWORD OnAccessViolation(HANDLE hThread,
-                          const EXCEPTION_RECORD& exceptionRecord) override;
-  void OnDLLLoad(const std::wstring& fileName, void* baseAddress) override;
-  DWORD OnSinglestep(uintptr_t bpAddress) override;
-  void OnHardwareBreakpoint(HANDLE hThread, uintptr_t bpAddress,
+  void OnDebugStart(HANDLE& file_handle, HANDLE thread_handle) override;
+  DWORD OnAccessViolation(HANDLE thread_handle,
+                          const EXCEPTION_RECORD& exception_record) override;
+  void OnDllLoad(const std::wstring& file_name, void* base_address) override;
+  DWORD OnSinglestep(uintptr_t bp_address) override;
+  void OnHardwareBreakpoint(HANDLE thread_handle, uintptr_t bp_address,
                             CONTEXT& context) override;
-  SoftBPAction OnSoftwareBreakpoint(HANDLE hThread, uintptr_t bpAddress) override;
+  SoftBpAction OnSoftwareBreakpoint(HANDLE thread_handle,
+                                    uintptr_t bp_address) override;
 
  private:
-  struct EFLRecord {
-    uintptr_t Address = 0;
-    std::vector<uint8_t> Original;
+  struct EflRecord {
+    uintptr_t address = 0;
+    std::vector<uint8_t> original;
   };
 
-  bool TMFinderCheck(CONTEXT* context);
+  bool TmFinderCheck(CONTEXT* context);
   void SelectThemidaSection(uintptr_t eip);
-  void TMInit(HANDLE& hPE);
-  void TMIATFix(uintptr_t eip);
-  void TMIATFix2();
-  void TMIATFix3(uintptr_t eip);
-  void TMIATFix4();
-  void TMIATFix5(uintptr_t eax);
-  void TMIATFixThemidaV1(uintptr_t baseCompare1);
-  bool GetIATBPAddressNew(uintptr_t& result);
-  bool InstallEFLPatch(uintptr_t eip, CONTEXT& context, EFLRecord& record);
+  void TmInit(HANDLE& file_handle);
+  void TmIatFix(uintptr_t eip);
+  void TmIatFix2();
+  void TmIatFix3(uintptr_t eip);
+  void TmIatFix4();
+  void TmIatFix5(uintptr_t eax);
+  void TmIatFixThemidaV1(uintptr_t base_compare1);
+  bool GetIatBpAddressNew(uintptr_t& result);
+  bool InstallEflPatch(uintptr_t eip, CONTEXT& context, EflRecord& record);
 
   void InstallCodeSectionGuard(uint32_t protection);
   bool IsGuardedAddress(uintptr_t address);
-  DWORD ProcessGuardedAccess(HANDLE hThread,
-                             const EXCEPTION_RECORD& exceptionRecord);
+  DWORD ProcessGuardedAccess(HANDLE thread_handle,
+                             const EXCEPTION_RECORD& exception_record);
 
-  void RestoreStolenOEPForMSVC6(HANDLE hThread, uintptr_t& oep);
-  void RestoreStolenOEPForMSVC9DLL(HANDLE hThread, uintptr_t& oep);
-  uintptr_t TryFindCorrectOEP(uintptr_t oep);
-  bool IsTMExceptionHandler(uintptr_t address);
-  void FixupAPICallSites(uintptr_t iat);
+  void RestoreStolenOepForMsvc6(HANDLE thread_handle, uintptr_t& oep);
+  void RestoreStolenOepForMsvc9Dll(HANDLE thread_handle, uintptr_t& oep);
+  uintptr_t TryFindCorrectOep(uintptr_t oep);
+  bool IsTmExceptionHandler(uintptr_t address);
+  void FixupApiCallSites(uintptr_t iat);
   void FinishUnpacking(uintptr_t oep);
 
   bool wow64_ = false;
 
-  int baseAccessCount_ = 0;
+  int base_access_count_ = 0;
   bool compressed_ = false;
   uintptr_t base1_ = 0;
-  uintptr_t repEIP_ = 0;
-  uintptr_t ntQIP_ = 0;
+  uintptr_t rep_eip_ = 0;
+  uintptr_t nt_qip_ = 0;
 
-  void* closeHandleAPI_ = nullptr;
-  void* allocMemAPI_ = nullptr;
-  void* allocHeapAPI_ = nullptr;
-  void* kiFastSystemCall_ = nullptr;
-  void* ntSIT_ = nullptr;
-  void* ntQIP64_ = nullptr;
-  void* virtualProtectAPI_ = nullptr;
-  void* corExeMain_ = nullptr;
+  void* close_handle_api_ = nullptr;
+  void* alloc_mem_api_ = nullptr;
+  void* alloc_heap_api_ = nullptr;
+  void* ki_fast_system_call_ = nullptr;
+  void* nt_sit_ = nullptr;
+  void* nt_qip64_ = nullptr;
+  void* virtual_protect_api_ = nullptr;
+  void* cor_exe_main_ = nullptr;
 
-  void* cmpImgBase_ = nullptr;
-  void* magicJump_ = nullptr;
-  void* magicJumpV1_ = nullptr;
+  void* cmp_img_base_ = nullptr;
+  void* magic_jump_ = nullptr;
+  void* magic_jump_v1_ = nullptr;
 
-  bool baseAccessed_ = false;
-  bool newVer_ = false;
-  bool ancientVer_ = false;
-  int allocMemCounter_ = 0;
+  bool base_accessed_ = false;
+  bool new_ver_ = false;
+  bool ancient_ver_ = false;
+  int alloc_mem_counter_ = 0;
 
-  uintptr_t iJumper_ = 0;
+  uintptr_t iat_jumper_ = 0;
   uintptr_t mj1_ = 0;
   uintptr_t mj2_ = 0;
   uintptr_t mj3_ = 0;
   uintptr_t mj4_ = 0;
-  std::array<EFLRecord, 3> efls_{};
-  bool themidaV2BySections_ = false;
+  std::array<EflRecord, 3> efls_{};
+  bool themida_v2_by_sections_ = false;
 
-  uintptr_t guardStart_ = 0;
-  uintptr_t guardEnd_ = 0;
-  uint32_t guardProtection_ = 0;
-  bool guardStepping_ = false;
+  uintptr_t guard_start_ = 0;
+  uintptr_t guard_end_ = 0;
+  uint32_t guard_protection_ = 0;
+  bool guard_stepping_ = false;
 
-  uint32_t tlsAddressesOfCallbacks_ = 0;
-  uint32_t tlsCounter_ = 0;
-  uint32_t tlsTotal_ = 0;
+  uint32_t tls_addresses_of_callbacks_ = 0;
+  uint32_t tls_counter_ = 0;
+  uint32_t tls_total_ = 0;
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_THEMIDA32_H_

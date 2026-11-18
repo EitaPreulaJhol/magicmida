@@ -1,22 +1,26 @@
 // Magicmida - C++ port
 // Thin wrapper around the bundled BeaEngine disassembler.
-#pragma once
-
-#include "common.h"
+// SPDX-License-Identifier: GPL-3.0-only
+// The BeaEngine structure definitions in this file are mirrored from
+// the LGPL-3.0-only BeaEngine header; see THIRD_PARTY_NOTICES.md.
+#ifndef MAGICMIDA_DISASM_H_
+#define MAGICMIDA_DISASM_H_
 
 #include <cstddef>
 #include <cstdint>
 
+#include "common.h"
+
 namespace magicmida {
 
-constexpr int INSTRUCT_LENGTH = 64;
+constexpr int kInstructLength = 64;
 
-constexpr int UNKNOWN_OPCODE = -1;
-constexpr int OUT_OF_BLOCK = -2;
+constexpr int kUnknownOpcode = -1;
+constexpr int kOutOfBlock = -2;
 
 // The following structures mirror the packed Delphi declarations in
 // BeaEngineDelphi.pas (which in turn mirror BeaEngine's public header).
-#pragma pack(push, 1)
+MAGICMIDA_PACK_PUSH_1
 
 struct TREX_Struct {
   uint8_t W_;
@@ -111,7 +115,7 @@ struct DISASM {
   uintptr_t EIP;
   uint64_t VirtualAddr;
   uint32_t SecurityBlock;
-  char CompleteInstr[INSTRUCT_LENGTH];
+  char CompleteInstr[kInstructLength];
   uint32_t Archi;
   uint64_t Options;
   TINSTRTYPE Instruction;
@@ -128,12 +132,14 @@ struct DISASM {
   uint8_t AbiSafetyPadding[256];
 };
 
-#pragma pack(pop)
+MAGICMIDA_PACK_POP
 
-static_assert(sizeof(void*) == 4 || sizeof(void*) == 8, "Unsupported pointer size");
+static_assert(sizeof(void*) == 4 || sizeof(void*) == 8,
+              "Unsupported pointer size");
 static_assert(offsetof(DISASM, VirtualAddr) == (sizeof(void*) == 8 ? 8u : 4u),
               "DISASM layout mismatch");
-static_assert(offsetof(DISASM, CompleteInstr) == (sizeof(void*) == 8 ? 20u : 16u),
+static_assert(offsetof(DISASM, CompleteInstr) ==
+                  (sizeof(void*) == 8 ? 20u : 16u),
               "DISASM layout mismatch");
 static_assert(offsetof(DISASM, Archi) == (sizeof(void*) == 8 ? 84u : 80u),
               "DISASM layout mismatch");
@@ -151,9 +157,11 @@ static_assert(offsetof(DISASM, Prefix) == (sizeof(void*) == 8 ? 1024u : 1020u),
               "DISASM layout mismatch");
 static_assert(offsetof(DISASM, Error) == (sizeof(void*) == 8 ? 1052u : 1048u),
               "DISASM layout mismatch");
-static_assert(offsetof(TINSTRTYPE, AddrValue) == 48u, "INSTRTYPE layout mismatch");
+static_assert(offsetof(TINSTRTYPE, AddrValue) == 48u,
+              "INSTRTYPE layout mismatch");
 static_assert(offsetof(TOPTYPE, Memory) == 44u, "OPTYPE layout mismatch");
-static_assert(offsetof(TMEMORYTYPE, Displacement) == 20u, "MEMORYTYPE layout mismatch");
+static_assert(offsetof(TMEMORYTYPE, Displacement) == 20u,
+              "MEMORYTYPE layout mismatch");
 
 extern "C" int __stdcall Disasm(DISASM* disasm);
 extern "C" const char* __stdcall BeaEngineVersion();
@@ -163,9 +171,13 @@ extern "C" const char* __stdcall BeaEngineVersion();
 int DisasmCheck(DISASM& disasm);
 
 // Helpers used by the ported code.
-inline uintptr_t DisasmEip(const DISASM& disasm) { return disasm.EIP; }
+inline uintptr_t DisasmEip(const DISASM& disasm) {
+  return disasm.EIP;
+}
 inline int64_t DisasmMemoryDisplacement(const TOPTYPE& operand) {
   return operand.Memory.Displacement;
 }
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_DISASM_H_

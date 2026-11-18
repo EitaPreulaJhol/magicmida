@@ -1,27 +1,31 @@
 // Magicmida - C++ port
 // Minimal TStream replacements (TFileStream / TMemoryStream).
+// SPDX-License-Identifier: GPL-3.0-only
 #include "stream.h"
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
+#include <vector>
 
 namespace magicmida {
 namespace {
 
 DWORD ToMoveMethod(Stream::Origin origin) {
   switch (origin) {
-    case Stream::Origin::Begin:
+    case Stream::Origin::kBegin:
       return FILE_BEGIN;
-    case Stream::Origin::Current:
+    case Stream::Origin::kCurrent:
       return FILE_CURRENT;
-    case Stream::Origin::End:
+    case Stream::Origin::kEnd:
       return FILE_END;
   }
   return FILE_BEGIN;
 }
 
 [[noreturn]] void ThrowLastError(const char* what) {
-  throw std::runtime_error(Format("%s failed (error %lu)", what, GetLastError()));
+  throw std::runtime_error(
+      Format("%s failed (error %lu)", what, GetLastError()));
 }
 
 }  // namespace
@@ -31,14 +35,15 @@ void Stream::CopyFrom(Stream& source, int64_t count) {
     return;
   }
 
-  std::vector<uint8_t> chunk(static_cast<size_t>(std::min<int64_t>(count, 64 * 1024)));
+  std::vector<uint8_t> chunk(
+      static_cast<size_t>(std::min<int64_t>(count, 64 * 1024)));
   int64_t remaining = count;
   while (remaining > 0) {
-    const size_t toRead =
-        static_cast<size_t>(std::min<int64_t>(remaining, static_cast<int64_t>(chunk.size())));
-    source.Read(chunk.data(), toRead);
-    Write(chunk.data(), toRead);
-    remaining -= static_cast<int64_t>(toRead);
+    const size_t to_read = static_cast<size_t>(
+        std::min<int64_t>(remaining, static_cast<int64_t>(chunk.size())));
+    source.Read(chunk.data(), to_read);
+    Write(chunk.data(), to_read);
+    remaining -= static_cast<int64_t>(to_read);
   }
 }
 
@@ -52,17 +57,17 @@ FileStream::FileStream(const std::wstring& path, Mode mode) {
   DWORD disposition = OPEN_EXISTING;
 
   switch (mode) {
-    case Mode::Read:
+    case Mode::kRead:
       access = GENERIC_READ;
       share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
       disposition = OPEN_EXISTING;
       break;
-    case Mode::ReadWrite:
+    case Mode::kReadWrite:
       access = GENERIC_READ | GENERIC_WRITE;
       share = FILE_SHARE_READ | FILE_SHARE_WRITE;
       disposition = OPEN_EXISTING;
       break;
-    case Mode::Create:
+    case Mode::kCreate:
       access = GENERIC_READ | GENERIC_WRITE;
       share = 0;
       disposition = CREATE_ALWAYS;
@@ -87,10 +92,10 @@ void FileStream::Read(void* buffer, size_t size) {
   uint8_t* cursor = static_cast<uint8_t*>(buffer);
   size_t remaining = size;
   while (remaining > 0) {
-    const DWORD toRead = static_cast<DWORD>(
+    const DWORD to_read = static_cast<DWORD>(
         std::min<size_t>(remaining, static_cast<size_t>(0x40000000)));
     DWORD read = 0;
-    if (!ReadFile(handle_, cursor, toRead, &read, nullptr)) {
+    if (!ReadFile(handle_, cursor, to_read, &read, nullptr)) {
       ThrowLastError("ReadFile");
     }
     if (read == 0) {
@@ -105,10 +110,10 @@ void FileStream::Write(const void* buffer, size_t size) {
   const uint8_t* cursor = static_cast<const uint8_t*>(buffer);
   size_t remaining = size;
   while (remaining > 0) {
-    const DWORD toWrite = static_cast<DWORD>(
+    const DWORD to_write = static_cast<DWORD>(
         std::min<size_t>(remaining, static_cast<size_t>(0x40000000)));
     DWORD written = 0;
-    if (!WriteFile(handle_, cursor, toWrite, &written, nullptr)) {
+    if (!WriteFile(handle_, cursor, to_write, &written, nullptr)) {
       ThrowLastError("WriteFile");
     }
     if (written == 0) {
@@ -149,17 +154,17 @@ int64_t FileStream::Size() {
 // --------------------------------------------------------------------------
 
 void MemoryStream::LoadFromFile(const std::wstring& path) {
-  FileStream file(path, FileStream::Mode::Read);
-  const int64_t fileSize = file.Size();
-  buffer_.resize(static_cast<size_t>(fileSize));
+  FileStream file(path, FileStream::Mode::kRead);
+  const int64_t file_size = file.Size();
+  buffer_.resize(static_cast<size_t>(file_size));
   position_ = 0;
-  if (fileSize > 0) {
+  if (file_size > 0) {
     file.Read(buffer_.data(), buffer_.size());
   }
 }
 
 void MemoryStream::SaveToFile(const std::wstring& path) {
-  FileStream file(path, FileStream::Mode::Create);
+  FileStream file(path, FileStream::Mode::kCreate);
   if (!buffer_.empty()) {
     file.Write(buffer_.data(), buffer_.size());
   }
@@ -169,8 +174,8 @@ void MemoryStream::Read(void* buffer, size_t size) {
   if (size == 0) {
     return;
   }
-  if (position_ < 0 ||
-      static_cast<uint64_t>(position_) + size > static_cast<uint64_t>(buffer_.size())) {
+  if (position_ < 0 || static_cast<uint64_t>(position_) + size >
+                           static_cast<uint64_t>(buffer_.size())) {
     throw std::runtime_error("MemoryStream read out of bounds");
   }
   std::memcpy(buffer, buffer_.data() + position_, size);
@@ -192,13 +197,13 @@ void MemoryStream::Write(const void* buffer, size_t size) {
 void MemoryStream::Seek(int64_t offset, Origin origin) {
   int64_t base = 0;
   switch (origin) {
-    case Origin::Begin:
+    case Origin::kBegin:
       base = 0;
       break;
-    case Origin::Current:
+    case Origin::kCurrent:
       base = position_;
       break;
-    case Origin::End:
+    case Origin::kEnd:
       base = static_cast<int64_t>(buffer_.size());
       break;
   }
@@ -215,7 +220,8 @@ int64_t MemoryStream::Size() {
 
 void MemoryStream::SetSize(int64_t size) {
   buffer_.resize(static_cast<size_t>(std::max<int64_t>(size, 0)));
-  position_ = std::min<int64_t>(position_, static_cast<int64_t>(buffer_.size()));
+  position_ =
+      std::min<int64_t>(position_, static_cast<int64_t>(buffer_.size()));
 }
 
 void MemoryStream::SetPosition(int64_t position) {

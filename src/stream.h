@@ -1,19 +1,21 @@
 // Magicmida - C++ port
 // Minimal TStream replacements (TFileStream / TMemoryStream).
-#pragma once
-
-#include "common.h"
+// SPDX-License-Identifier: GPL-3.0-only
+#ifndef MAGICMIDA_STREAM_H_
+#define MAGICMIDA_STREAM_H_
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "common.h"
+
 namespace magicmida {
 
 class Stream {
  public:
-  enum class Origin { Begin, Current, End };
+  enum class Origin { kBegin, kCurrent, kEnd };
 
   virtual ~Stream() = default;
 
@@ -31,7 +33,7 @@ class Stream {
 
 class FileStream final : public Stream {
  public:
-  enum class Mode { Read, ReadWrite, Create };
+  enum class Mode { kRead, kReadWrite, kCreate };
 
   FileStream(const std::wstring& path, Mode mode);
   ~FileStream() override;
@@ -76,3 +78,5 @@ class MemoryStream final : public Stream {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_STREAM_H_

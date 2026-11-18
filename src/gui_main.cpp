@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // Native Win32 GUI front-end.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "common.h"
 #include "patcher.h"
 #include "pe_report.h"
@@ -13,11 +14,10 @@
 #include "themida32.h"
 #endif
 
-#include <windows.h>
-
 #include <commdlg.h>
 #include <richedit.h>
 #include <shellapi.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -26,8 +26,7 @@
 #include <string>
 #include <vector>
 
-using namespace magicmida;
-
+namespace magicmida {
 namespace {
 
 constexpr wchar_t kWindowClass[] = L"MagicmidaGuiWindow";
@@ -37,29 +36,29 @@ constexpr WORD kRtRcData = 10;
 constexpr UINT_PTR kTargetTimerId = 1;
 
 enum ControlId : int {
-  IDC_TARGET_LABEL = 100,
-  IDC_TARGET,
-  IDC_BROWSE,
-  IDC_COMMAND_LABEL,
-  IDC_COMMAND,
-  IDC_PID_LABEL,
-  IDC_PID,
-  IDC_START,
-  IDC_CANCEL,
-  IDC_LOG,
-  IDC_STATUS,
+  kTargetLabel = 100,
+  kTarget,
+  kBrowse,
+  kCommandLabel,
+  kCommand,
+  kPidLabel,
+  kPid,
+  kStart,
+  kCancel,
+  kLog,
+  kStatus,
 };
 
 enum MenuId : int {
-  IDM_OPEN = 200,
-  IDM_CLEAR_LOG,
-  IDM_SAVE_LOG,
-  IDM_COPY_LOG,
-  IDM_EXIT,
-  IDM_ABOUT,
-  IDM_ADV_DATA_SECTIONS,
-  IDM_ADV_NO_SCYLLA,
-  IDM_ADV_FIX_RELOCS,
+  kMenuOpen = 200,
+  kMenuClearLog,
+  kMenuSaveLog,
+  kMenuCopyLog,
+  kMenuExit,
+  kMenuAbout,
+  kMenuAdvDataSections,
+  kMenuAdvNoScylla,
+  kMenuAdvFixRelocs,
 };
 
 constexpr UINT kMsgLog = WM_APP + 1;
@@ -75,52 +74,61 @@ struct AppState {
   HINSTANCE instance = nullptr;
   HWND hwnd = nullptr;
   HMENU menu = nullptr;
-  HMENU advancedMenu = nullptr;
-  HWND targetLabel = nullptr;
+  HMENU advanced_menu = nullptr;
+  HWND target_label = nullptr;
   HWND target = nullptr;
   HWND browse = nullptr;
-  HWND commandLabel = nullptr;
+  HWND command_label = nullptr;
   HWND command = nullptr;
-  HWND pidLabel = nullptr;
+  HWND pid_label = nullptr;
   HWND pid = nullptr;
   HWND start = nullptr;
   HWND cancel = nullptr;
   HWND log = nullptr;
   HWND status = nullptr;
-  bool createDataSections = false;
-  bool disableScylla = false;
-  bool fixRelocations = false;
-  HANDLE cancelEvent = nullptr;
-  std::wstring cancelEventName;
-  HFONT uiFont = nullptr;
-  HFONT logFont = nullptr;
+  bool create_data_sections = false;
+  bool disable_scylla = false;
+  bool fix_relocations = false;
+  HANDLE cancel_event = nullptr;
+  std::wstring cancel_event_name;
+  HFONT ui_font = nullptr;
+  HFONT log_font = nullptr;
   HACCEL accel = nullptr;
   HANDLE worker = nullptr;
   bool running = false;
 };
 
-AppState g_app;
-int g_dpi = 96;
+// Function-local pointers to heap objects that are intentionally never
+// destroyed: static objects with non-trivial destructors are not allowed.
+AppState& App() {
+  static AppState* app = new AppState;
+  return *app;
+}
+
+int& DpiScale() {
+  static int dpi = 96;
+  return dpi;
+}
 
 int Dip(int value) {
-  return MulDiv(value, g_dpi, 96);
+  return MulDiv(value, DpiScale(), 96);
 }
 
 enum class Command {
-  Unpack = 0,
-  Shrink = 1,
-  MkData = 2,
-  DumpCode = 3,
-  Info = 4,
+  kUnpack = 0,
+  kShrink = 1,
+  kMkData = 2,
+  kDumpCode = 3,
+  kInfo = 4,
 };
 
 struct Job {
-  Command command = Command::Unpack;
+  Command command = Command::kUnpack;
   std::wstring target;
-  bool createDataSections = false;
-  bool useScyllaHide = true;
-  bool fixRelocations = false;
-  bool useWorker = false;
+  bool create_data_sections = false;
+  bool use_scylla_hide = true;
+  bool fix_relocations = false;
+  bool use_worker = false;
   DWORD pid = 0;
 };
 
@@ -141,43 +149,44 @@ void DisableVisualStyles() {
   if (uxtheme == nullptr) {
     return;
   }
+  // NOLINTNEXTLINE(readability/casting)
   using SetThemeAppPropertiesFn = void(WINAPI*)(DWORD);
-  const auto setThemeAppProperties =
+  const auto set_theme_app_properties =
       reinterpret_cast<SetThemeAppPropertiesFn>(
           GetProcAddress(uxtheme, "SetThemeAppProperties"));
-  if (setThemeAppProperties != nullptr) {
-    setThemeAppProperties(0);
+  if (set_theme_app_properties != nullptr) {
+    set_theme_app_properties(0);
   }
 }
 
 void SetStatus(const wchar_t* text) {
-  if (g_app.status != nullptr) {
-    SetWindowTextW(g_app.status, text);
+  if (App().status != nullptr) {
+    SetWindowTextW(App().status, text);
   }
 }
 
 const char* LogPrefix(LogMsgType type) {
   switch (type) {
-    case LogMsgType::Good:
+    case LogMsgType::kGood:
       return "[Good] ";
-    case LogMsgType::Warning:
+    case LogMsgType::kWarning:
       return "[Warning] ";
-    case LogMsgType::Fatal:
+    case LogMsgType::kFatal:
       return "[Fatal] ";
-    case LogMsgType::Info:
+    case LogMsgType::kInfo:
     default:
       return "[Info] ";
   }
 }
 
 void AppendLog(LogMsgType type, const std::string& text) {
-  if (g_app.log == nullptr) {
+  if (App().log == nullptr) {
     return;
   }
 
-  int length = GetWindowTextLengthW(g_app.log);
+  int length = GetWindowTextLengthW(App().log);
   if (length > 2000000) {
-    SetWindowTextW(g_app.log, L"");
+    SetWindowTextW(App().log, L"");
     length = 0;
   }
 
@@ -186,94 +195,100 @@ void AppendLog(LogMsgType type, const std::string& text) {
   const std::string line =
       text.empty()
           ? std::string("\r\n")
-          : "[" + Format("%02u:%02u:%02u", now.wHour, now.wMinute,
-                         now.wSecond) +
+          : "[" +
+                Format("%02u:%02u:%02u", now.wHour, now.wMinute, now.wSecond) +
                 "] " + LogPrefix(type) + text + "\r\n";
   const std::wstring wide = Utf8ToWide(line);
 
-  SendMessageW(g_app.log, EM_SETREADONLY, FALSE, 0);
-  SendMessageW(g_app.log, EM_SETSEL, static_cast<WPARAM>(length),
+  SendMessageW(App().log, EM_SETREADONLY, FALSE, 0);
+  SendMessageW(App().log, EM_SETSEL, static_cast<WPARAM>(length),
                static_cast<LPARAM>(length));
-  SendMessageW(g_app.log, EM_REPLACESEL, FALSE,
+  SendMessageW(App().log, EM_REPLACESEL, FALSE,
                reinterpret_cast<LPARAM>(wide.c_str()));
-  SendMessageW(g_app.log, EM_SETREADONLY, TRUE, 0);
-  SendMessageW(g_app.log, EM_SCROLLCARET, 0, 0);
+  SendMessageW(App().log, EM_SETREADONLY, TRUE, 0);
+  SendMessageW(App().log, EM_SCROLLCARET, 0, 0);
 }
 
 void GuiLogSink(LogMsgType type, const std::string& message) {
-  if (g_app.hwnd == nullptr) {
+  if (App().hwnd == nullptr) {
     return;
   }
   auto* entry = new LogEntry{type, message};
-  if (!PostMessageW(g_app.hwnd, kMsgLog, 0,
-                    reinterpret_cast<LPARAM>(entry))) {
+  if (!PostMessageW(App().hwnd, kMsgLog, 0, reinterpret_cast<LPARAM>(entry))) {
     delete entry;
   }
 }
 
 void GuiStatusSink(const std::string& text) {
-  if (g_app.hwnd == nullptr) {
+  if (App().hwnd == nullptr) {
     return;
   }
   auto* copy = new std::string(text);
-  if (!PostMessageW(g_app.hwnd, kMsgStatus, 0,
+  if (!PostMessageW(App().hwnd, kMsgStatus, 0,
                     reinterpret_cast<LPARAM>(copy))) {
     delete copy;
   }
 }
 
 int SelectedCommand() {
-  const int selection = static_cast<int>(
-      SendMessageW(g_app.command, CB_GETCURSEL, 0, 0));
+  const int selection =
+      static_cast<int>(SendMessageW(App().command, CB_GETCURSEL, 0, 0));
   if (selection < 0) {
     return -1;
   }
   return static_cast<int>(
-      SendMessageW(g_app.command, CB_GETITEMDATA, selection, 0));
+      SendMessageW(App().command, CB_GETITEMDATA, selection, 0));
 }
 
 struct TargetFlags {
   std::wstring path;
   uint16_t machine = 0;
-  bool isDll = false;
+  bool is_dll = false;
   bool valid = false;
 };
 
-TargetFlags g_targetFlags;
-std::wstring g_loggedTarget;
+TargetFlags& CachedTargetFlags() {
+  static TargetFlags* flags = new TargetFlags;
+  return *flags;
+}
+
+std::wstring& LoggedTarget() {
+  static std::wstring* target = new std::wstring;
+  return *target;
+}
 
 // Reads the target PE flags once per path. UpdateCommandUi is called for
 // every EN_CHANGE, so without the cache (and the debounce timer) a network
 // path could stall the UI.
 const TargetFlags& CurrentTargetFlags() {
-  const std::wstring target = GetText(g_app.target);
-  if (target == g_targetFlags.path) {
-    return g_targetFlags;
+  const std::wstring target = GetText(App().target);
+  if (target == CachedTargetFlags().path) {
+    return CachedTargetFlags();
   }
 
-  g_targetFlags = TargetFlags{};
-  g_targetFlags.path = target;
+  CachedTargetFlags() = TargetFlags{};
+  CachedTargetFlags().path = target;
   if (target.empty() || !FileExists(target)) {
-    return g_targetFlags;
+    return CachedTargetFlags();
   }
 
   try {
-    const PEFlags flags = ReadPEFlags(target);
-    g_targetFlags.machine = flags.machine;
-    g_targetFlags.isDll = flags.isDll;
-    g_targetFlags.valid = true;
+    const PeFlags flags = ReadPeFlags(target);
+    CachedTargetFlags().machine = flags.machine;
+    CachedTargetFlags().is_dll = flags.is_dll;
+    CachedTargetFlags().valid = true;
   } catch (...) {
   }
-  return g_targetFlags;
+  return CachedTargetFlags();
 }
 
 void MaybeLogTargetInfo() {
-  const std::wstring target = GetText(g_app.target);
+  const std::wstring target = GetText(App().target);
   if (target.empty()) {
-    g_loggedTarget.clear();
+    LoggedTarget().clear();
     return;
   }
-  if (target == g_loggedTarget) {
+  if (target == LoggedTarget()) {
     return;
   }
 
@@ -282,92 +297,90 @@ void MaybeLogTargetInfo() {
     return;
   }
 
-  g_loggedTarget = target;
-  LogF(ltGood, "Opened target: %s", WideToUtf8(target).c_str());
+  LoggedTarget() = target;
+  LogF(kLogGood, "Opened target: %s", WideToUtf8(target).c_str());
   try {
-    EmitPEInfo(target, [](const std::string& line) { Log(ltInfo, line); });
+    EmitPeInfo(target, [](const std::string& line) { Log(kLogInfo, line); });
   } catch (const std::exception& error) {
-    LogF(ltWarning, "Could not read the target PE info: %s", error.what());
+    LogF(kLogWarning, "Could not read the target PE info: %s", error.what());
   }
 }
 
 void UpdateAdvancedMenu() {
-  if (g_app.advancedMenu == nullptr) {
+  if (App().advanced_menu == nullptr) {
     return;
   }
-  CheckMenuItem(g_app.advancedMenu, IDM_ADV_DATA_SECTIONS,
-                MF_BYCOMMAND | (g_app.createDataSections ? MF_CHECKED
-                                                         : MF_UNCHECKED));
-  CheckMenuItem(g_app.advancedMenu, IDM_ADV_NO_SCYLLA,
-                MF_BYCOMMAND | (g_app.disableScylla ? MF_CHECKED
-                                                    : MF_UNCHECKED));
-  CheckMenuItem(g_app.advancedMenu, IDM_ADV_FIX_RELOCS,
-                MF_BYCOMMAND | (g_app.fixRelocations ? MF_CHECKED
-                                                     : MF_UNCHECKED));
+  CheckMenuItem(
+      App().advanced_menu, kMenuAdvDataSections,
+      MF_BYCOMMAND | (App().create_data_sections ? MF_CHECKED : MF_UNCHECKED));
+  CheckMenuItem(
+      App().advanced_menu, kMenuAdvNoScylla,
+      MF_BYCOMMAND | (App().disable_scylla ? MF_CHECKED : MF_UNCHECKED));
+  CheckMenuItem(
+      App().advanced_menu, kMenuAdvFixRelocs,
+      MF_BYCOMMAND | (App().fix_relocations ? MF_CHECKED : MF_UNCHECKED));
 }
 
 void EnableAdvancedItem(HMENU menu, UINT id, bool enabled) {
   if (menu == nullptr) {
     return;
   }
-  EnableMenuItem(menu, id,
-                 MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED));
+  EnableMenuItem(menu, id, MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED));
 }
 
 void UpdateCommandUi() {
   const int selection = SelectedCommand();
-  const bool unpack = selection == static_cast<int>(Command::Unpack);
-  const bool shrink = selection == static_cast<int>(Command::Shrink);
-  const bool dumpCode = selection == static_cast<int>(Command::DumpCode);
-  const bool enabled = !g_app.running;
+  const bool unpack = selection == static_cast<int>(Command::kUnpack);
+  const bool shrink = selection == static_cast<int>(Command::kShrink);
+  const bool dump_code = selection == static_cast<int>(Command::kDumpCode);
+  const bool enabled = !App().running;
   const TargetFlags& target = CurrentTargetFlags();
-  const bool dllTarget = (unpack || shrink) && target.isDll;
-  const bool canCreateData = target.machine == IMAGE_FILE_MACHINE_I386;
+  const bool dll_target = (unpack || shrink) && target.is_dll;
+  const bool can_create_data = target.machine == IMAGE_FILE_MACHINE_I386;
 
-  EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_DATA_SECTIONS,
-                     enabled && unpack && canCreateData);
-  EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_NO_SCYLLA,
-                     enabled && unpack);
-  EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_FIX_RELOCS,
-                     enabled && dllTarget);
+  EnableAdvancedItem(App().advanced_menu, kMenuAdvDataSections,
+                     enabled && unpack && can_create_data);
+  EnableAdvancedItem(App().advanced_menu, kMenuAdvNoScylla, enabled && unpack);
+  EnableAdvancedItem(App().advanced_menu, kMenuAdvFixRelocs,
+                     enabled && dll_target);
   UpdateAdvancedMenu();
 
-  EnableWindow(g_app.pidLabel, enabled && dumpCode);
-  EnableWindow(g_app.pid, enabled && dumpCode);
-  EnableWindow(g_app.cancel, !enabled && g_app.cancelEvent != nullptr);
+  EnableWindow(App().pid_label, enabled && dump_code);
+  EnableWindow(App().pid, enabled && dump_code);
+  EnableWindow(App().cancel, !enabled && App().cancel_event != nullptr);
 
   MaybeLogTargetInfo();
 }
 
 void SetRunning(bool running) {
-  g_app.running = running;
+  App().running = running;
 
-  EnableWindow(g_app.target, !running);
-  EnableWindow(g_app.browse, !running);
-  EnableWindow(g_app.command, !running);
-  EnableWindow(g_app.start, !running);
-  EnableWindow(g_app.cancel, running && g_app.cancelEvent != nullptr);
+  EnableWindow(App().target, !running);
+  EnableWindow(App().browse, !running);
+  EnableWindow(App().command, !running);
+  EnableWindow(App().start, !running);
+  EnableWindow(App().cancel, running && App().cancel_event != nullptr);
 
   if (!running) {
     UpdateCommandUi();
   } else {
-    EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_DATA_SECTIONS, false);
-    EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_NO_SCYLLA, false);
-    EnableAdvancedItem(g_app.advancedMenu, IDM_ADV_FIX_RELOCS, false);
-    EnableWindow(g_app.pidLabel, FALSE);
-    EnableWindow(g_app.pid, FALSE);
+    EnableAdvancedItem(App().advanced_menu, kMenuAdvDataSections, false);
+    EnableAdvancedItem(App().advanced_menu, kMenuAdvNoScylla, false);
+    EnableAdvancedItem(App().advanced_menu, kMenuAdvFixRelocs, false);
+    EnableWindow(App().pid_label, FALSE);
+    EnableWindow(App().pid, FALSE);
   }
 }
 
 void BrowseForTarget() {
-  if (g_app.running) {
+  if (App().running) {
     return;
   }
 
   wchar_t file[32768]{};
   OPENFILENAMEW dialog{};
   dialog.lStructSize = sizeof(dialog);
-  dialog.hwndOwner = g_app.hwnd;
+  dialog.hwndOwner = App().hwnd;
   dialog.lpstrFilter =
       L"Executables (*.exe;*.dll)\0*.exe;*.dll\0All files (*.*)\0*.*\0";
   dialog.lpstrFile = file;
@@ -376,23 +389,23 @@ void BrowseForTarget() {
   dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
 
   if (GetOpenFileNameW(&dialog)) {
-    g_loggedTarget.clear();
-    SetWindowTextW(g_app.target, file);
+    LoggedTarget().clear();
+    SetWindowTextW(App().target, file);
     UpdateCommandUi();
   }
 }
 
 const wchar_t* CommandName(Command command) {
   switch (command) {
-    case Command::Shrink:
+    case Command::kShrink:
       return L"shrink";
-    case Command::MkData:
+    case Command::kMkData:
       return L"mkdata";
-    case Command::DumpCode:
+    case Command::kDumpCode:
       return L"dumpcode";
-    case Command::Info:
+    case Command::kInfo:
       return L"info";
-    case Command::Unpack:
+    case Command::kUnpack:
     default:
       return L"unpack";
   }
@@ -406,10 +419,10 @@ bool ReadJob(Job* job, std::wstring* error) {
   }
 
   job->command = static_cast<Command>(selection);
-  job->target = GetText(g_app.target);
-  job->createDataSections = g_app.createDataSections;
-  job->useScyllaHide = !g_app.disableScylla;
-  job->fixRelocations = g_app.fixRelocations;
+  job->target = GetText(App().target);
+  job->create_data_sections = App().create_data_sections;
+  job->use_scylla_hide = !App().disable_scylla;
+  job->fix_relocations = App().fix_relocations;
   job->pid = 0;
 
   if (job->target.empty()) {
@@ -420,16 +433,16 @@ bool ReadJob(Job* job, std::wstring* error) {
     *error = L"Target file not found.";
     return false;
   }
-  if (job->fixRelocations && !CurrentTargetFlags().isDll) {
-    job->fixRelocations = false;
-    g_app.fixRelocations = false;
+  if (job->fix_relocations && !CurrentTargetFlags().is_dll) {
+    job->fix_relocations = false;
+    App().fix_relocations = false;
     UpdateAdvancedMenu();
   }
-  if (job->createDataSections &&
+  if (job->create_data_sections &&
       CurrentTargetFlags().machine != IMAGE_FILE_MACHINE_I386) {
     // MkData only exists in the 32-bit build; the 64-bit debugger ignores it.
-    job->createDataSections = false;
-    g_app.createDataSections = false;
+    job->create_data_sections = false;
+    App().create_data_sections = false;
     UpdateAdvancedMenu();
   }
 
@@ -438,9 +451,9 @@ bool ReadJob(Job* job, std::wstring* error) {
 
 #if defined(_WIN64)
 bool LoadEmbeddedWorker(std::vector<uint8_t>* data) {
-  const HRSRC resource = FindResourceW(
-      nullptr, MAKEINTRESOURCEW(kWorkerResourceId),
-      MAKEINTRESOURCEW(kRtRcData));
+  const HRSRC resource =
+      FindResourceW(nullptr, MAKEINTRESOURCEW(kWorkerResourceId),
+                    MAKEINTRESOURCEW(kRtRcData));
   if (resource == nullptr) {
     return false;
   }
@@ -456,55 +469,55 @@ bool LoadEmbeddedWorker(std::vector<uint8_t>* data) {
 }
 
 bool WriteWorkerToTemp(const std::vector<uint8_t>& data, std::wstring* path) {
-  wchar_t tempDir[MAX_PATH]{};
-  if (GetTempPathW(_countof(tempDir), tempDir) == 0) {
+  wchar_t temp_dir[MAX_PATH]{};
+  if (GetTempPathW(_countof(temp_dir), temp_dir) == 0) {
     return false;
   }
 
-  wchar_t tempName[MAX_PATH]{};
-  if (GetTempFileNameW(tempDir, L"mm", 0, tempName) == 0) {
+  wchar_t temp_name[MAX_PATH]{};
+  if (GetTempFileNameW(temp_dir, L"mm", 0, temp_name) == 0) {
     return false;
   }
 
-  std::wstring exePath = tempName;
-  exePath += L".exe";
-  if (!MoveFileExW(tempName, exePath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-    DeleteFileW(tempName);
+  std::wstring exe_path = temp_name;
+  exe_path += L".exe";
+  if (!MoveFileExW(temp_name, exe_path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+    DeleteFileW(temp_name);
     return false;
   }
 
-  HANDLE file = CreateFileW(exePath.c_str(), GENERIC_WRITE, 0, nullptr,
+  HANDLE file = CreateFileW(exe_path.c_str(), GENERIC_WRITE, 0, nullptr,
                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) {
-    DeleteFileW(exePath.c_str());
+    DeleteFileW(exe_path.c_str());
     return false;
   }
 
   DWORD written = 0;
-  const BOOL ok = WriteFile(file, data.data(),
-                            static_cast<DWORD>(data.size()), &written, nullptr);
+  const BOOL ok = WriteFile(file, data.data(), static_cast<DWORD>(data.size()),
+                            &written, nullptr);
   CloseHandle(file);
   if (!ok || written != data.size()) {
-    DeleteFileW(exePath.c_str());
+    DeleteFileW(exe_path.c_str());
     return false;
   }
 
-  *path = exePath;
+  *path = exe_path;
   return true;
 }
 
 bool RunWorkerJob(const Job& job) {
   std::vector<uint8_t> worker;
   if (!LoadEmbeddedWorker(&worker)) {
-    Log(ltFatal,
+    Log(kLogFatal,
         "The embedded 32-bit worker is missing. Rebuild with "
         "-DMAGICMIDA_32BIT_WORKER=<path-to-32-bit-magicmida.exe>.");
     return false;
   }
 
-  std::wstring workerPath;
-  if (!WriteWorkerToTemp(worker, &workerPath)) {
-    Log(ltFatal, "Could not extract the embedded 32-bit worker.");
+  std::wstring worker_path;
+  if (!WriteWorkerToTemp(worker, &worker_path)) {
+    Log(kLogFatal, "Could not extract the embedded 32-bit worker.");
     return false;
   }
 
@@ -512,23 +525,24 @@ bool RunWorkerJob(const Job& job) {
   security.nLength = sizeof(security);
   security.bInheritHandle = TRUE;
 
-  HANDLE readPipe = nullptr;
-  HANDLE writePipe = nullptr;
-  if (!CreatePipe(&readPipe, &writePipe, &security, 0)) {
-    DeleteFileW(workerPath.c_str());
-    LogF(ltFatal, "Could not create worker pipe (error %lu).", GetLastError());
+  HANDLE read_pipe = nullptr;
+  HANDLE write_pipe = nullptr;
+  if (!CreatePipe(&read_pipe, &write_pipe, &security, 0)) {
+    DeleteFileW(worker_path.c_str());
+    LogF(kLogFatal, "Could not create worker pipe (error %lu).",
+         GetLastError());
     return false;
   }
-  SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
+  SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
 
-  HANDLE nul = CreateFileW(L"NUL", GENERIC_READ,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
-                           OPEN_EXISTING, 0, nullptr);
+  HANDLE nul =
+      CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                  &security, OPEN_EXISTING, 0, nullptr);
   if (nul == INVALID_HANDLE_VALUE) {
-    CloseHandle(readPipe);
-    CloseHandle(writePipe);
-    DeleteFileW(workerPath.c_str());
-    Log(ltFatal, "Could not open NUL for the 32-bit worker.");
+    CloseHandle(read_pipe);
+    CloseHandle(write_pipe);
+    DeleteFileW(worker_path.c_str());
+    Log(kLogFatal, "Could not open NUL for the 32-bit worker.");
     return false;
   }
 
@@ -536,39 +550,40 @@ bool RunWorkerJob(const Job& job) {
   startup.cb = sizeof(startup);
   startup.dwFlags = STARTF_USESTDHANDLES;
   startup.hStdInput = nul;
-  startup.hStdOutput = writePipe;
-  startup.hStdError = writePipe;
+  startup.hStdOutput = write_pipe;
+  startup.hStdError = write_pipe;
 
-  std::wstring commandLine =
-      L"\"" + workerPath + L"\" --worker " +
+  std::wstring command_line =
+      L"\"" + worker_path + L"\" --worker " +
       std::to_wstring(static_cast<int>(job.command)) + L" " +
       std::to_wstring(job.pid) + L" " +
-      (job.createDataSections ? L"1" : L"0") + L" " +
-      (job.useScyllaHide ? L"1" : L"0") + L" " +
-      (job.fixRelocations ? L"1" : L"0") + L" \"" +
-      (g_app.cancelEventName.empty() ? L"-" : g_app.cancelEventName) +
+      (job.create_data_sections ? L"1" : L"0") + L" " +
+      (job.use_scylla_hide ? L"1" : L"0") + L" " +
+      (job.fix_relocations ? L"1" : L"0") + L" \"" +
+      (App().cancel_event_name.empty() ? L"-" : App().cancel_event_name) +
       L"\" \"" + job.target + L"\"";
 
   PROCESS_INFORMATION process{};
-  const BOOL created = CreateProcessW(
-      workerPath.c_str(), commandLine.data(), nullptr, nullptr, TRUE,
-      CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
-  const DWORD createError = GetLastError();
-  CloseHandle(writePipe);
+  const BOOL created = CreateProcessW(worker_path.c_str(), command_line.data(),
+                                      nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+                                      nullptr, nullptr, &startup, &process);
+  const DWORD create_error = GetLastError();
+  CloseHandle(write_pipe);
   CloseHandle(nul);
 
   if (!created) {
-    CloseHandle(readPipe);
-    DeleteFileW(workerPath.c_str());
-    LogF(ltFatal, "Could not start the 32-bit worker (error %lu).",
-         createError);
+    CloseHandle(read_pipe);
+    DeleteFileW(worker_path.c_str());
+    LogF(kLogFatal, "Could not start the 32-bit worker (error %lu).",
+         create_error);
     return false;
   }
 
   std::string buffer;
   char chunk[4096];
   DWORD read = 0;
-  while (ReadFile(readPipe, chunk, sizeof(chunk), &read, nullptr) && read > 0) {
+  while (ReadFile(read_pipe, chunk, sizeof(chunk), &read, nullptr) &&
+         read > 0) {
     buffer.append(chunk, read);
     size_t newline = 0;
     while ((newline = buffer.find('\n')) != std::string::npos) {
@@ -581,16 +596,16 @@ bool RunWorkerJob(const Job& job) {
         ReportStatus(line.substr(1));
         continue;
       }
-      LogMsgType type = ltInfo;
+      LogMsgType type = kLogInfo;
       switch (line[0]) {
         case 'G':
-          type = ltGood;
+          type = kLogGood;
           break;
         case 'W':
-          type = ltWarning;
+          type = kLogWarning;
           break;
         case 'F':
-          type = ltFatal;
+          type = kLogFatal;
           break;
         default:
           break;
@@ -599,25 +614,25 @@ bool RunWorkerJob(const Job& job) {
     }
   }
   if (!buffer.empty()) {
-    Log(ltInfo, buffer);
+    Log(kLogInfo, buffer);
   }
 
   WaitForSingleObject(process.hProcess, INFINITE);
-  DWORD exitCode = 1;
-  GetExitCodeProcess(process.hProcess, &exitCode);
-  if (exitCode != 0) {
-    LogF(ltWarning, "The 32-bit worker exited with code %lu.", exitCode);
+  DWORD exit_code = 1;
+  GetExitCodeProcess(process.hProcess, &exit_code);
+  if (exit_code != 0) {
+    LogF(kLogWarning, "The 32-bit worker exited with code %lu.", exit_code);
   }
   CloseHandle(process.hThread);
   CloseHandle(process.hProcess);
-  CloseHandle(readPipe);
-  DeleteFileW(workerPath.c_str());
-  return exitCode == 0;
+  CloseHandle(read_pipe);
+  DeleteFileW(worker_path.c_str());
+  return exit_code == 0;
 }
 #else
 bool RunWorkerJob(const Job& job) {
   (void)job;
-  Log(ltFatal,
+  Log(kLogFatal,
       "32-bit worker dispatch is only available in the 64-bit build.");
   return false;
 }
@@ -626,7 +641,7 @@ bool RunWorkerJob(const Job& job) {
 bool PrepareOutputFile(const std::wstring& target) {
   const std::wstring output = MakeUnpackedFileName(target);
   if (FileExists(output)) {
-    LogF(ltWarning,
+    LogF(kLogWarning,
          "The output file already exists and will be overwritten: %s",
          WideToUtf8(output).c_str());
   }
@@ -638,7 +653,7 @@ bool PrepareOutputFile(const std::wstring& target) {
   if (probe == INVALID_HANDLE_VALUE) {
     const DWORD error = GetLastError();
     if (error != ERROR_FILE_NOT_FOUND) {
-      LogF(ltFatal, "The output file is not writable: %s (error %lu)",
+      LogF(kLogFatal, "The output file is not writable: %s (error %lu)",
            WideToUtf8(output).c_str(), error);
       return false;
     }
@@ -648,37 +663,37 @@ bool PrepareOutputFile(const std::wstring& target) {
   return true;
 }
 
-void NormalizeOutputLayout(const std::wstring& fileName) {
+void NormalizeOutputLayout(const std::wstring& file_name) {
   try {
-    NormalizePEFile(fileName);
+    NormalizePeFile(file_name);
   } catch (const std::exception& error) {
-    LogF(ltWarning, "PE layout normalization failed: %s", error.what());
+    LogF(kLogWarning, "PE layout normalization failed: %s", error.what());
   }
 }
 
 bool ExecuteJob(const Job& job) {
-  if (g_app.cancelEvent != nullptr) {
-    SetCancellationEvent(g_app.cancelEvent);
+  if (App().cancel_event != nullptr) {
+    SetCancellationEvent(App().cancel_event);
   }
 
-  if (job.command == Command::Unpack && !PrepareOutputFile(job.target)) {
+  if (job.command == Command::kUnpack && !PrepareOutputFile(job.target)) {
     return false;
   }
 
-  if (job.useWorker) {
+  if (job.use_worker) {
     return RunWorkerJob(job);
   }
 
   bool success = false;
   try {
     switch (job.command) {
-      case Command::Unpack: {
+      case Command::kUnpack: {
 #if defined(_WIN64)
-        ThemidaDebugger64 debugger(job.target, L"", job.createDataSections,
-                                   job.useScyllaHide, job.fixRelocations);
+        ThemidaDebugger64 debugger(job.target, L"", job.create_data_sections,
+                                   job.use_scylla_hide, job.fix_relocations);
 #else
-        ThemidaDebugger debugger(job.target, L"", job.createDataSections,
-                                 job.useScyllaHide, job.fixRelocations);
+        ThemidaDebugger debugger(job.target, L"", job.create_data_sections,
+                                 job.use_scylla_hide, job.fix_relocations);
 #endif
         debugger.Run();
         success = debugger.Succeeded();
@@ -687,42 +702,42 @@ bool ExecuteJob(const Job& job) {
           if (FileExists(output)) {
             NormalizeOutputLayout(output);
           } else {
-            LogF(ltWarning, "Normalization skipped: output not found: %s",
+            LogF(kLogWarning, "Normalization skipped: output not found: %s",
                  WideToUtf8(output).c_str());
           }
         }
         break;
       }
-      case Command::Shrink: {
+      case Command::kShrink: {
         const std::wstring backup = job.target + L".bak";
         if (!CopyFileW(job.target.c_str(), backup.c_str(), TRUE)) {
           const DWORD error = GetLastError();
           if (error == ERROR_FILE_EXISTS) {
-            LogF(ltInfo, "Shrink backup already exists: %s",
+            LogF(kLogInfo, "Shrink backup already exists: %s",
                  WideToUtf8(backup).c_str());
           } else {
-            LogF(ltWarning, "Could not create shrink backup: %s (error %lu)",
+            LogF(kLogWarning, "Could not create shrink backup: %s (error %lu)",
                  WideToUtf8(backup).c_str(), error);
           }
         } else {
-          LogF(ltInfo, "Shrink backup written to: %s",
+          LogF(kLogInfo, "Shrink backup written to: %s",
                WideToUtf8(backup).c_str());
         }
 
         Patcher patcher(job.target);
         patcher.ProcessShrink();
-        if (job.fixRelocations) {
+        if (job.fix_relocations) {
           try {
             FixDllRelocations(job.target, 0);
           } catch (const std::exception& error) {
-            LogF(ltWarning, "Relocation fix failed: %s", error.what());
+            LogF(kLogWarning, "Relocation fix failed: %s", error.what());
           }
         }
         NormalizeOutputLayout(job.target);
         success = true;
         break;
       }
-      case Command::MkData: {
+      case Command::kMkData: {
         Patcher patcher(job.target);
         success = patcher.ProcessMkData();
         if (success) {
@@ -730,15 +745,15 @@ bool ExecuteJob(const Job& job) {
         }
         break;
       }
-      case Command::DumpCode: {
+      case Command::kDumpCode: {
         if (!EnableDebugPrivilege()) {
-          Log(ltInfo,
+          Log(kLogInfo,
               "Could not enable SeDebugPrivilege (continuing anyway).");
         }
         HANDLE process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, job.pid);
         if (process == nullptr) {
-          throw std::runtime_error(Format(
-              "OpenProcess(%lu) failed (error %lu)", job.pid, GetLastError()));
+          throw std::runtime_error(Format("OpenProcess(%lu) failed (error %lu)",
+                                          job.pid, GetLastError()));
         }
         try {
           Patcher patcher(job.target);
@@ -751,19 +766,18 @@ bool ExecuteJob(const Job& job) {
         CloseHandle(process);
         break;
       }
-      case Command::Info: {
-        EmitPEInfo(job.target, [](const std::string& line) {
-          Log(ltInfo, line);
-        });
+      case Command::kInfo: {
+        EmitPeInfo(job.target,
+                   [](const std::string& line) { Log(kLogInfo, line); });
         success = true;
         break;
       }
     }
   } catch (const std::exception& error) {
-    LogF(ltFatal, "%s", error.what());
+    LogF(kLogFatal, "%s", error.what());
     success = false;
   } catch (...) {
-    Log(ltFatal, "Unknown error.");
+    Log(kLogFatal, "Unknown error.");
     success = false;
   }
 
@@ -774,8 +788,8 @@ DWORD WINAPI RunJobThread(LPVOID parameter) {
   Job* job = static_cast<Job*>(parameter);
   const bool success = ExecuteJob(*job);
   delete job;
-  if (g_app.hwnd != nullptr) {
-    PostMessageW(g_app.hwnd, kMsgDone, success ? 1 : 0, 0);
+  if (App().hwnd != nullptr) {
+    PostMessageW(App().hwnd, kMsgDone, success ? 1 : 0, 0);
   }
   return 0;
 }
@@ -783,7 +797,7 @@ DWORD WINAPI RunJobThread(LPVOID parameter) {
 bool ResolveJob(Job* job, uint16_t* machine, std::wstring* error) {
   uint16_t detected = 0;
   try {
-    detected = ReadPEMachine(job->target);
+    detected = ReadPeMachine(job->target);
   } catch (const std::exception& exception) {
     *error = L"Could not read the target PE header: ";
     *error += Utf8ToWide(exception.what());
@@ -794,11 +808,11 @@ bool ResolveJob(Job* job, uint16_t* machine, std::wstring* error) {
 #if defined(_WIN64)
   if (detected == IMAGE_FILE_MACHINE_I386) {
     // A 32-bit target is unpacked by the embedded 32-bit worker.
-    job->useWorker = true;
+    job->use_worker = true;
   } else if (detected == IMAGE_FILE_MACHINE_AMD64) {
-    job->useWorker = false;
-    if (job->command == Command::MkData ||
-        job->command == Command::DumpCode) {
+    job->use_worker = false;
+    if (job->command == Command::kMkData ||
+        job->command == Command::kDumpCode) {
       *error = L"MkData and Dump code are only available for 32-bit targets.";
       return false;
     }
@@ -816,186 +830,182 @@ bool ResolveJob(Job* job, uint16_t* machine, std::wstring* error) {
 }
 
 void StartJob() {
-  if (g_app.running) {
+  if (App().running) {
     return;
   }
 
   Job job;
   std::wstring error;
   if (!ReadJob(&job, &error)) {
-    MessageBoxW(g_app.hwnd, error.c_str(), kWindowTitle,
+    MessageBoxW(App().hwnd, error.c_str(), kWindowTitle,
                 MB_OK | MB_ICONWARNING);
     return;
   }
 
   uint16_t machine = 0;
   if (!ResolveJob(&job, &machine, &error)) {
-    MessageBoxW(g_app.hwnd, error.c_str(), kWindowTitle,
+    MessageBoxW(App().hwnd, error.c_str(), kWindowTitle,
                 MB_OK | MB_ICONWARNING);
     return;
   }
 
   MaybeLogTargetInfo();
 
-  if (job.command == Command::DumpCode) {
-    const std::wstring text = GetText(g_app.pid);
+  if (job.command == Command::kDumpCode) {
+    const std::wstring text = GetText(App().pid);
     wchar_t* end = nullptr;
     const unsigned long value = wcstoul(text.c_str(), &end, 10);
     if (value == 0 || end == text.c_str() || *end != L'\0') {
-      MessageBoxW(g_app.hwnd, L"Enter a valid process ID.", kWindowTitle,
+      MessageBoxW(App().hwnd, L"Enter a valid process ID.", kWindowTitle,
                   MB_OK | MB_ICONWARNING);
       return;
     }
     job.pid = static_cast<DWORD>(value);
   }
 
-  if (job.command == Command::Unpack) {
+  if (job.command == Command::kUnpack) {
     const std::wstring output = MakeUnpackedFileName(job.target);
     if (FileExists(output)) {
-      const std::wstring text =
-          L"The output file already exists:\n\n" + output +
-          L"\n\nOverwrite it?";
-      if (MessageBoxW(g_app.hwnd, text.c_str(), kWindowTitle,
+      const std::wstring text = L"The output file already exists:\n\n" +
+                                output + L"\n\nOverwrite it?";
+      if (MessageBoxW(App().hwnd, text.c_str(), kWindowTitle,
                       MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
         return;
       }
     }
   }
 
-  static unsigned int cancelCounter = 0;
-  if (g_app.cancelEvent != nullptr) {
-    CloseHandle(g_app.cancelEvent);
-    g_app.cancelEvent = nullptr;
+  static unsigned int cancel_counter = 0;
+  if (App().cancel_event != nullptr) {
+    CloseHandle(App().cancel_event);
+    App().cancel_event = nullptr;
   }
-  g_app.cancelEventName =
-      L"Local\\MagicmidaCancel-" + std::to_wstring(GetCurrentProcessId()) +
-      L"-" + std::to_wstring(GetTickCount64()) + L"-" +
-      std::to_wstring(++cancelCounter);
-  g_app.cancelEvent =
-      CreateEventW(nullptr, TRUE, FALSE, g_app.cancelEventName.c_str());
-  if (g_app.cancelEvent == nullptr) {
-    LogF(ltWarning, "Could not create the cancellation event (error %lu).",
+  App().cancel_event_name = L"Local\\MagicmidaCancel-" +
+                            std::to_wstring(GetCurrentProcessId()) + L"-" +
+                            std::to_wstring(GetTickCount64()) + L"-" +
+                            std::to_wstring(++cancel_counter);
+  App().cancel_event =
+      CreateEventW(nullptr, TRUE, FALSE, App().cancel_event_name.c_str());
+  if (App().cancel_event == nullptr) {
+    LogF(kLogWarning, "Could not create the cancellation event (error %lu).",
          GetLastError());
-    g_app.cancelEventName.clear();
+    App().cancel_event_name.clear();
   }
 
-  PEFlags flags;
+  PeFlags flags;
   try {
-    flags = ReadPEFlags(job.target);
+    flags = ReadPeFlags(job.target);
   } catch (...) {
   }
 
   std::wstring status = L"Running: ";
   status += (machine == IMAGE_FILE_MACHINE_I386) ? L"i386" : L"amd64";
-  status += flags.isDll ? L" DLL " : L" EXE ";
+  status += flags.is_dll ? L" DLL " : L" EXE ";
   status += CommandName(job.command);
 
-  LogF(ltInfo, "Starting %s: %s", WideToUtf8(CommandName(job.command)).c_str(),
+  LogF(kLogInfo, "Starting %s: %s",
+       WideToUtf8(CommandName(job.command)).c_str(),
        WideToUtf8(job.target).c_str());
   SetRunning(true);
   SetStatus(status.c_str());
 
-  auto* threadJob = new Job(job);
-  HANDLE thread = CreateThread(nullptr, 0, RunJobThread, threadJob, 0, nullptr);
+  auto* thread_job = new Job(job);
+  HANDLE thread =
+      CreateThread(nullptr, 0, RunJobThread, thread_job, 0, nullptr);
   if (thread == nullptr) {
-    delete threadJob;
-    if (g_app.cancelEvent != nullptr) {
-      CloseHandle(g_app.cancelEvent);
-      g_app.cancelEvent = nullptr;
+    delete thread_job;
+    if (App().cancel_event != nullptr) {
+      CloseHandle(App().cancel_event);
+      App().cancel_event = nullptr;
     }
-    g_app.cancelEventName.clear();
+    App().cancel_event_name.clear();
     SetCancellationEvent(nullptr);
     SetRunning(false);
     SetStatus(L"Failed to start.");
-    LogF(ltFatal, "Could not start worker thread (error %lu)", GetLastError());
+    LogF(kLogFatal, "Could not start worker thread (error %lu)",
+         GetLastError());
     return;
   }
-  g_app.worker = thread;
+  App().worker = thread;
 }
 
-HWND CreateChild(const wchar_t* className, const wchar_t* text, DWORD style,
-                 DWORD exStyle, int id) {
-  return CreateWindowExW(
-      exStyle, className, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0,
-      g_app.hwnd,
-      reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), g_app.instance,
-      nullptr);
+HWND CreateChild(const wchar_t* class_name, const wchar_t* text, DWORD style,
+                 DWORD ex_style, int id) {
+  return CreateWindowExW(ex_style, class_name, text,
+                         WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, App().hwnd,
+                         reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
+                         App().instance, nullptr);
 }
 
 void CreateControls(HWND hwnd) {
-  g_app.hwnd = hwnd;
-  g_app.targetLabel =
-      CreateChild(L"STATIC", L"Target:", SS_LEFT, 0, IDC_TARGET_LABEL);
-  g_app.target = CreateChild(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP,
-                             WS_EX_CLIENTEDGE, IDC_TARGET);
-  g_app.browse =
-      CreateChild(L"BUTTON", L"Browse...", BS_PUSHBUTTON | WS_TABSTOP, 0,
-                  IDC_BROWSE);
-  g_app.commandLabel =
-      CreateChild(L"STATIC", L"Action:", SS_LEFT, 0, IDC_COMMAND_LABEL);
-  g_app.command = CreateChild(L"COMBOBOX", L"",
-                              CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
-                              IDC_COMMAND);
-  g_app.pidLabel =
-      CreateChild(L"STATIC", L"PID:", SS_LEFT, 0, IDC_PID_LABEL);
-  g_app.pid = CreateChild(L"EDIT", L"0", ES_NUMBER | WS_TABSTOP,
-                          WS_EX_CLIENTEDGE, IDC_PID);
-  g_app.start =
-      CreateChild(L"BUTTON", L"Start", BS_DEFPUSHBUTTON | WS_TABSTOP, 0,
-                  IDC_START);
-  g_app.cancel = CreateChild(L"BUTTON", L"Cancel",
-                             BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_CANCEL);
-  g_app.log = CreateChild(
-      L"EDIT", L"",
-      WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
-      WS_EX_CLIENTEDGE, IDC_LOG);
-  g_app.status = CreateChild(L"STATIC", L"Ready.",
-                             SS_LEFT | SS_SUNKEN | SS_CENTERIMAGE, 0,
-                             IDC_STATUS);
+  App().hwnd = hwnd;
+  App().target_label =
+      CreateChild(L"STATIC", L"Target:", SS_LEFT, 0, kTargetLabel);
+  App().target = CreateChild(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP,
+                             WS_EX_CLIENTEDGE, kTarget);
+  App().browse = CreateChild(L"BUTTON", L"Browse...",
+                             BS_PUSHBUTTON | WS_TABSTOP, 0, kBrowse);
+  App().command_label =
+      CreateChild(L"STATIC", L"Action:", SS_LEFT, 0, kCommandLabel);
+  App().command =
+      CreateChild(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+                  0, kCommand);
+  App().pid_label = CreateChild(L"STATIC", L"PID:", SS_LEFT, 0, kPidLabel);
+  App().pid = CreateChild(L"EDIT", L"0", ES_NUMBER | WS_TABSTOP,
+                          WS_EX_CLIENTEDGE, kPid);
+  App().start = CreateChild(L"BUTTON", L"Start", BS_DEFPUSHBUTTON | WS_TABSTOP,
+                            0, kStart);
+  App().cancel =
+      CreateChild(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 0, kCancel);
+  App().log = CreateChild(
+      L"EDIT", L"", WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+      WS_EX_CLIENTEDGE, kLog);
+  App().status = CreateChild(L"STATIC", L"Ready.",
+                             SS_LEFT | SS_SUNKEN | SS_CENTERIMAGE, 0, kStatus);
 
-  const auto addCommand = [](Command command, const wchar_t* text) {
-    const LRESULT index = SendMessageW(
-        g_app.command, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
+  const auto add_command = [](Command command, const wchar_t* text) {
+    const LRESULT index = SendMessageW(App().command, CB_ADDSTRING, 0,
+                                       reinterpret_cast<LPARAM>(text));
     if (index != CB_ERR) {
-      SendMessageW(g_app.command, CB_SETITEMDATA, static_cast<WPARAM>(index),
+      SendMessageW(App().command, CB_SETITEMDATA, static_cast<WPARAM>(index),
                    static_cast<LPARAM>(command));
     }
   };
-  addCommand(Command::Unpack, L"Unpack");
-  addCommand(Command::Shrink, L"Shrink");
-  addCommand(Command::MkData, L"Make data sections");
-  addCommand(Command::DumpCode, L"Dump code");
-  SendMessageW(g_app.command, CB_SETCURSEL, 0, 0);
+  add_command(Command::kUnpack, L"Unpack");
+  add_command(Command::kShrink, L"Shrink");
+  add_command(Command::kMkData, L"Make data sections");
+  add_command(Command::kDumpCode, L"Dump code");
+  SendMessageW(App().command, CB_SETCURSEL, 0, 0);
 
   // Windows 2000-style UI font.  MS Sans Serif is the classic Win32 dialog
   // font; scaling keeps it readable on high-DPI displays.
-  g_app.uiFont = CreateFontW(
-      -MulDiv(8, g_dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+  App().ui_font = CreateFontW(
+      -MulDiv(8, DpiScale(), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
       DEFAULT_PITCH | FF_SWISS, L"MS Sans Serif");
-  if (g_app.uiFont == nullptr) {
-    g_app.uiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+  if (App().ui_font == nullptr) {
+    App().ui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
   }
 
-  g_app.logFont = CreateFontW(
-      -MulDiv(9, g_dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+  App().log_font = CreateFontW(
+      -MulDiv(9, DpiScale(), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
       FIXED_PITCH | FF_MODERN, L"Courier New");
-  if (g_app.logFont == nullptr) {
-    g_app.logFont = g_app.uiFont;
+  if (App().log_font == nullptr) {
+    App().log_font = App().ui_font;
   }
 
-  const HWND normalFontControls[] = {
-      g_app.targetLabel, g_app.target,      g_app.browse,
-      g_app.commandLabel, g_app.command,    g_app.pidLabel,   g_app.pid,
-      g_app.start,        g_app.cancel,      g_app.status,
+  const HWND normal_font_controls[] = {
+      App().target_label, App().target,    App().browse, App().command_label,
+      App().command,      App().pid_label, App().pid,    App().start,
+      App().cancel,       App().status,
   };
-  for (HWND control : normalFontControls) {
-    SendMessageW(control, WM_SETFONT,
-                 reinterpret_cast<WPARAM>(g_app.uiFont), TRUE);
+  for (HWND control : normal_font_controls) {
+    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(App().ui_font),
+                 TRUE);
   }
-  SendMessageW(g_app.log, WM_SETFONT,
-               reinterpret_cast<WPARAM>(g_app.logFont), TRUE);
+  SendMessageW(App().log, WM_SETFONT, reinterpret_cast<WPARAM>(App().log_font),
+               TRUE);
 
   DragAcceptFiles(hwnd, TRUE);
   UpdateCommandUi();
@@ -1009,79 +1019,79 @@ void Layout(HWND hwnd) {
   }
 
   const int margin = Dip(8);
-  const int rowHeight = Dip(22);
+  const int row_height = Dip(22);
   const int gap = Dip(6);
-  const int labelHeight = Dip(18);
+  const int label_height = Dip(18);
   const int width = client.right - 2 * margin;
 
-  const int targetLabelWidth = Dip(44);
-  const int browseWidth = Dip(60);
-  const int commandLabelWidth = Dip(52);
-  const int commandWidth = Dip(140);
-  const int pidLabelWidth = Dip(30);
-  const int pidEditWidth = Dip(48);
-  const int startWidth = Dip(72);
-  const int cancelWidth = Dip(72);
+  const int target_label_width = Dip(44);
+  const int browse_width = Dip(60);
+  const int command_label_width = Dip(52);
+  const int command_width = Dip(140);
+  const int pid_label_width = Dip(30);
+  const int pid_edit_width = Dip(48);
+  const int start_width = Dip(72);
+  const int cancel_width = Dip(72);
 
   int y = margin;
-  MoveWindow(g_app.targetLabel, margin, y + Dip(2), targetLabelWidth,
-             labelHeight, TRUE);
-  MoveWindow(g_app.target, margin + targetLabelWidth + Dip(4), y,
-             width - targetLabelWidth - Dip(4) - browseWidth - Dip(6),
-             rowHeight, TRUE);
-  MoveWindow(g_app.browse, margin + width - browseWidth, y, browseWidth,
-             rowHeight, TRUE);
+  MoveWindow(App().target_label, margin, y + Dip(2), target_label_width,
+             label_height, TRUE);
+  MoveWindow(App().target, margin + target_label_width + Dip(4), y,
+             width - target_label_width - Dip(4) - browse_width - Dip(6),
+             row_height, TRUE);
+  MoveWindow(App().browse, margin + width - browse_width, y, browse_width,
+             row_height, TRUE);
 
-  y += rowHeight + gap;
+  y += row_height + gap;
   int x = margin;
-  MoveWindow(g_app.commandLabel, x, y + Dip(2), commandLabelWidth,
-             labelHeight, TRUE);
-  x += commandLabelWidth + Dip(4);
-  MoveWindow(g_app.command, x, y, commandWidth, Dip(160), TRUE);
-  x += commandWidth + Dip(8);
-  MoveWindow(g_app.pidLabel, x, y + Dip(2), pidLabelWidth, labelHeight, TRUE);
-  x += pidLabelWidth + Dip(4);
-  MoveWindow(g_app.pid, x, y, pidEditWidth, rowHeight, TRUE);
-  MoveWindow(g_app.cancel, margin + width - startWidth - Dip(6) - cancelWidth,
-             y, cancelWidth, rowHeight, TRUE);
-  MoveWindow(g_app.start, margin + width - startWidth, y, startWidth,
-             rowHeight, TRUE);
+  MoveWindow(App().command_label, x, y + Dip(2), command_label_width,
+             label_height, TRUE);
+  x += command_label_width + Dip(4);
+  MoveWindow(App().command, x, y, command_width, Dip(160), TRUE);
+  x += command_width + Dip(8);
+  MoveWindow(App().pid_label, x, y + Dip(2), pid_label_width, label_height,
+             TRUE);
+  x += pid_label_width + Dip(4);
+  MoveWindow(App().pid, x, y, pid_edit_width, row_height, TRUE);
+  MoveWindow(App().cancel, margin + width - start_width - Dip(6) - cancel_width,
+             y, cancel_width, row_height, TRUE);
+  MoveWindow(App().start, margin + width - start_width, y, start_width,
+             row_height, TRUE);
 
-  y += rowHeight + gap;
-  const int statusHeight = Dip(18);
-  const int statusY = client.bottom - margin - statusHeight;
-  MoveWindow(g_app.status, margin, statusY, width, statusHeight, TRUE);
+  y += row_height + gap;
+  const int status_height = Dip(18);
+  const int status_y = client.bottom - margin - status_height;
+  MoveWindow(App().status, margin, status_y, width, status_height, TRUE);
 
-  int logHeight = statusY - gap - y;
-  if (logHeight < Dip(80)) {
-    logHeight = Dip(80);
+  int log_height = status_y - gap - y;
+  if (log_height < Dip(80)) {
+    log_height = Dip(80);
   }
-  MoveWindow(g_app.log, margin, y, width, logHeight, TRUE);
+  MoveWindow(App().log, margin, y, width, log_height, TRUE);
 }
 
 void CopyLog() {
-  if (g_app.log == nullptr) {
+  if (App().log == nullptr) {
     return;
   }
 
   std::wstring text;
   DWORD start = 0;
   DWORD end = 0;
-  SendMessageW(g_app.log, EM_GETSEL, reinterpret_cast<WPARAM>(&start),
+  SendMessageW(App().log, EM_GETSEL, reinterpret_cast<WPARAM>(&start),
                reinterpret_cast<LPARAM>(&end));
   if (end > start) {
     text.resize(static_cast<size_t>(end - start) + 1);
-    const LRESULT copied = SendMessageW(
-        g_app.log, EM_GETSELTEXT, 0,
-        reinterpret_cast<LPARAM>(text.data()));
+    const LRESULT copied = SendMessageW(App().log, EM_GETSELTEXT, 0,
+                                        reinterpret_cast<LPARAM>(text.data()));
     text.resize(copied > 0 ? static_cast<size_t>(copied) : 0);
   } else {
-    const int length = GetWindowTextLengthW(g_app.log);
+    const int length = GetWindowTextLengthW(App().log);
     if (length <= 0) {
       return;
     }
     text.resize(static_cast<size_t>(length) + 1);
-    GetWindowTextW(g_app.log, text.data(), length + 1);
+    GetWindowTextW(App().log, text.data(), length + 1);
     text.resize(static_cast<size_t>(length));
   }
 
@@ -1089,7 +1099,7 @@ void CopyLog() {
     return;
   }
 
-  if (!OpenClipboard(g_app.hwnd)) {
+  if (!OpenClipboard(App().hwnd)) {
     return;
   }
   EmptyClipboard();
@@ -1112,14 +1122,14 @@ void CopyLog() {
 }
 
 void SaveLog() {
-  if (g_app.log == nullptr) {
+  if (App().log == nullptr) {
     return;
   }
 
   wchar_t file[MAX_PATH]{};
   OPENFILENAMEW dialog{};
   dialog.lStructSize = sizeof(dialog);
-  dialog.hwndOwner = g_app.hwnd;
+  dialog.hwndOwner = App().hwnd;
   dialog.lpstrFilter = L"Text files (*.txt)\0*.txt\0All files (*.*)\0*.*\0";
   dialog.lpstrFile = file;
   dialog.nMaxFile = static_cast<DWORD>(_countof(file));
@@ -1130,24 +1140,24 @@ void SaveLog() {
     return;
   }
 
-  const int length = GetWindowTextLengthW(g_app.log);
+  const int length = GetWindowTextLengthW(App().log);
   std::wstring text(static_cast<size_t>(length) + 1, L'\0');
   if (length > 0) {
-    GetWindowTextW(g_app.log, text.data(), length + 1);
+    GetWindowTextW(App().log, text.data(), length + 1);
   }
   text.resize(static_cast<size_t>(length));
 
   try {
-    FileStream out(file, FileStream::Mode::Create);
-    constexpr uint8_t bom[] = {0xEF, 0xBB, 0xBF};
-    out.Write(bom, sizeof(bom));
+    FileStream out(file, FileStream::Mode::kCreate);
+    constexpr uint8_t kBom[] = {0xEF, 0xBB, 0xBF};
+    out.Write(kBom, sizeof(kBom));
     const std::string utf8 = WideToUtf8(text);
     if (!utf8.empty()) {
       out.Write(utf8.data(), utf8.size());
     }
     SetStatus(L"Log saved.");
   } catch (const std::exception& error) {
-    MessageBoxW(g_app.hwnd, Utf8ToWide(error.what()).c_str(), kWindowTitle,
+    MessageBoxW(App().hwnd, Utf8ToWide(error.what()).c_str(), kWindowTitle,
                 MB_OK | MB_ICONWARNING);
   }
 }
@@ -1158,12 +1168,12 @@ void ShowAbout() {
   text += L"\n\nScyllaHide ";
   text += Utf8ToWide(scyllahide::Version());
   text += L" (embedded)\n\nUnpacks Themida/WinLicense protected binaries.";
-  MessageBoxW(g_app.hwnd, text.c_str(), L"About Magicmida",
+  MessageBoxW(App().hwnd, text.c_str(), L"About Magicmida",
               MB_OK | MB_ICONINFORMATION);
 }
 
-LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
-                         LPARAM lParam) {
+LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w_param,
+                         LPARAM l_param) {
   switch (message) {
     case WM_CREATE:
       CreateControls(hwnd);
@@ -1174,67 +1184,67 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
       return 0;
 
     case WM_TIMER:
-      if (wParam == kTargetTimerId) {
+      if (w_param == kTargetTimerId) {
         KillTimer(hwnd, kTargetTimerId);
         UpdateCommandUi();
       }
       return 0;
 
     case WM_COMMAND: {
-      const int id = LOWORD(wParam);
-      const int notification = HIWORD(wParam);
+      const int id = LOWORD(w_param);
+      const int notification = HIWORD(w_param);
       switch (id) {
-        case IDC_BROWSE:
-        case IDM_OPEN:
+        case kBrowse:
+        case kMenuOpen:
           BrowseForTarget();
           return 0;
-        case IDC_START:
+        case kStart:
           StartJob();
           return 0;
-        case IDC_CANCEL:
-          if (g_app.running && g_app.cancelEvent != nullptr) {
-            SetEvent(g_app.cancelEvent);
-            EnableWindow(g_app.cancel, FALSE);
+        case kCancel:
+          if (App().running && App().cancel_event != nullptr) {
+            SetEvent(App().cancel_event);
+            EnableWindow(App().cancel, FALSE);
             SetStatus(L"Cancelling...");
           }
           return 0;
-        case IDC_COMMAND:
+        case kCommand:
           if (notification == CBN_SELCHANGE) {
             UpdateCommandUi();
           }
           return 0;
-        case IDC_TARGET:
+        case kTarget:
           if (notification == EN_CHANGE) {
             // Debounce: reading the PE flags on every keystroke can stall on
             // slow (network) paths.
             SetTimer(hwnd, kTargetTimerId, 250, nullptr);
           }
           return 0;
-        case IDM_CLEAR_LOG:
-          SetWindowTextW(g_app.log, L"");
+        case kMenuClearLog:
+          SetWindowTextW(App().log, L"");
           return 0;
-        case IDM_SAVE_LOG:
+        case kMenuSaveLog:
           SaveLog();
           return 0;
-        case IDM_COPY_LOG:
+        case kMenuCopyLog:
           CopyLog();
           return 0;
-        case IDM_EXIT:
+        case kMenuExit:
           PostMessageW(hwnd, WM_CLOSE, 0, 0);
           return 0;
-        case IDM_ABOUT:
+        case kMenuAbout:
           ShowAbout();
           return 0;
-        case IDM_ADV_DATA_SECTIONS:
-          g_app.createDataSections = !g_app.createDataSections;
+        case kMenuAdvDataSections:
+          App().create_data_sections = !App().create_data_sections;
           UpdateAdvancedMenu();
           return 0;
-        case IDM_ADV_NO_SCYLLA:
-          g_app.disableScylla = !g_app.disableScylla;
+        case kMenuAdvNoScylla:
+          App().disable_scylla = !App().disable_scylla;
           UpdateAdvancedMenu();
           return 0;
-        case IDM_ADV_FIX_RELOCS:
-          g_app.fixRelocations = !g_app.fixRelocations;
+        case kMenuAdvFixRelocs:
+          App().fix_relocations = !App().fix_relocations;
           UpdateAdvancedMenu();
           return 0;
         default:
@@ -1244,18 +1254,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
     }
 
     case WM_DROPFILES: {
-      if (g_app.running) {
-        DragFinish(reinterpret_cast<HDROP>(wParam));
+      if (App().running) {
+        DragFinish(reinterpret_cast<HDROP>(w_param));
         return 0;
       }
-      auto drop = reinterpret_cast<HDROP>(wParam);
+      auto drop = reinterpret_cast<HDROP>(w_param);
       const UINT length = DragQueryFileW(drop, 0, nullptr, 0);
       if (length > 0) {
         std::wstring path(static_cast<size_t>(length) + 1, L'\0');
         DragQueryFileW(drop, 0, path.data(), length + 1);
         path.resize(length);
-        g_loggedTarget.clear();
-        SetWindowTextW(g_app.target, path.c_str());
+        LoggedTarget().clear();
+        SetWindowTextW(App().target, path.c_str());
         UpdateCommandUi();
       }
       DragFinish(drop);
@@ -1263,7 +1273,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
     }
 
     case kMsgLog: {
-      auto* entry = reinterpret_cast<LogEntry*>(lParam);
+      auto* entry = reinterpret_cast<LogEntry*>(l_param);
       if (entry != nullptr) {
         AppendLog(entry->type, entry->text);
         delete entry;
@@ -1272,7 +1282,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
     }
 
     case kMsgStatus: {
-      auto* text = reinterpret_cast<std::string*>(lParam);
+      auto* text = reinterpret_cast<std::string*>(l_param);
       if (text != nullptr) {
         SetStatus(Utf8ToWide(*text).c_str());
         delete text;
@@ -1281,25 +1291,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
     }
 
     case kMsgDone: {
-      if (g_app.worker != nullptr) {
-        WaitForSingleObject(g_app.worker, INFINITE);
-        CloseHandle(g_app.worker);
-        g_app.worker = nullptr;
+      if (App().worker != nullptr) {
+        WaitForSingleObject(App().worker, INFINITE);
+        CloseHandle(App().worker);
+        App().worker = nullptr;
       }
-      if (g_app.cancelEvent != nullptr) {
-        CloseHandle(g_app.cancelEvent);
-        g_app.cancelEvent = nullptr;
+      if (App().cancel_event != nullptr) {
+        CloseHandle(App().cancel_event);
+        App().cancel_event = nullptr;
       }
-      g_app.cancelEventName.clear();
+      App().cancel_event_name.clear();
       SetCancellationEvent(nullptr);
       SetRunning(false);
-      SetStatus(wParam != 0 ? L"Completed successfully."
-                            : L"Failed. See the log.");
+      SetStatus(w_param != 0 ? L"Completed successfully."
+                             : L"Failed. See the log.");
       return 0;
     }
 
     case WM_CLOSE:
-      if (g_app.running) {
+      if (App().running) {
         MessageBoxW(hwnd,
                     L"An operation is still running. Please wait for it to "
                     L"finish.",
@@ -1311,25 +1321,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
 
     case WM_DESTROY:
       KillTimer(hwnd, kTargetTimerId);
-      if (g_app.cancelEvent != nullptr) {
-        CloseHandle(g_app.cancelEvent);
-        g_app.cancelEvent = nullptr;
+      if (App().cancel_event != nullptr) {
+        CloseHandle(App().cancel_event);
+        App().cancel_event = nullptr;
       }
-      if (g_app.worker != nullptr) {
-        CloseHandle(g_app.worker);
-        g_app.worker = nullptr;
+      if (App().worker != nullptr) {
+        CloseHandle(App().worker);
+        App().worker = nullptr;
       }
-      if (g_app.accel != nullptr) {
-        DestroyAcceleratorTable(g_app.accel);
-        g_app.accel = nullptr;
+      if (App().accel != nullptr) {
+        DestroyAcceleratorTable(App().accel);
+        App().accel = nullptr;
       }
-      if (g_app.logFont != nullptr && g_app.logFont != g_app.uiFont) {
-        DeleteObject(g_app.logFont);
-        g_app.logFont = nullptr;
+      if (App().log_font != nullptr && App().log_font != App().ui_font) {
+        DeleteObject(App().log_font);
+        App().log_font = nullptr;
       }
-      if (g_app.uiFont != nullptr) {
-        DeleteObject(g_app.uiFont);
-        g_app.uiFont = nullptr;
+      if (App().ui_font != nullptr) {
+        DeleteObject(App().ui_font);
+        App().ui_font = nullptr;
       }
       DragAcceptFiles(hwnd, FALSE);
       PostQuitMessage(0);
@@ -1339,18 +1349,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam,
       break;
   }
 
-  return DefWindowProcW(hwnd, message, wParam, lParam);
+  return DefWindowProcW(hwnd, message, w_param, l_param);
 }
 
 char WorkerLogPrefix(LogMsgType type) {
   switch (type) {
-    case LogMsgType::Good:
+    case LogMsgType::kGood:
       return 'G';
-    case LogMsgType::Warning:
+    case LogMsgType::kWarning:
       return 'W';
-    case LogMsgType::Fatal:
+    case LogMsgType::kFatal:
       return 'F';
-    case LogMsgType::Info:
+    case LogMsgType::kInfo:
     default:
       return 'I';
   }
@@ -1405,8 +1415,7 @@ void CliWrite(const std::string& text) {
 void CliLogSink(LogMsgType type, const std::string& message) {
   SYSTEMTIME now{};
   GetLocalTime(&now);
-  CliWrite("[" + Format("%02u:%02u:%02u", now.wHour, now.wMinute,
-                         now.wSecond) +
+  CliWrite("[" + Format("%02u:%02u:%02u", now.wHour, now.wMinute, now.wSecond) +
            "] " + LogPrefix(type) + message + "\r\n");
 }
 
@@ -1414,9 +1423,9 @@ void AttachCliConsole() {
   if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
     AllocConsole();
   }
-  const HANDLE output = CreateFileW(
-      L"CONOUT$", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-      OPEN_EXISTING, 0, nullptr);
+  const HANDLE output =
+      CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                  nullptr, OPEN_EXISTING, 0, nullptr);
   if (output != INVALID_HANDLE_VALUE) {
     SetStdHandle(STD_OUTPUT_HANDLE, output);
     SetStdHandle(STD_ERROR_HANDLE, output);
@@ -1449,14 +1458,14 @@ void PrintVersion() {
            std::string(scyllahide::Version()) + ")\n");
 }
 
-int RunCommandLine(int argumentCount, wchar_t** arguments) {
+int RunCommandLine(int argument_count, wchar_t** arguments) {
   AttachCliConsole();
 
   Job job;
-  bool commandSet = false;
+  bool command_set = false;
   bool force = false;
 
-  for (int i = 1; i < argumentCount; ++i) {
+  for (int i = 1; i < argument_count; ++i) {
     const std::wstring argument = arguments[i];
     if (argument == L"--help" || argument == L"-h") {
       PrintUsage();
@@ -1467,30 +1476,30 @@ int RunCommandLine(int argumentCount, wchar_t** arguments) {
       return 0;
     }
     if (argument == L"--unpack") {
-      job.command = Command::Unpack;
-      commandSet = true;
+      job.command = Command::kUnpack;
+      command_set = true;
     } else if (argument == L"--shrink") {
-      job.command = Command::Shrink;
-      commandSet = true;
+      job.command = Command::kShrink;
+      command_set = true;
     } else if (argument == L"--mkdata") {
-      job.command = Command::MkData;
-      commandSet = true;
+      job.command = Command::kMkData;
+      command_set = true;
     } else if (argument == L"--dumpcode") {
-      job.command = Command::DumpCode;
-      commandSet = true;
+      job.command = Command::kDumpCode;
+      command_set = true;
     } else if (argument == L"--info") {
-      job.command = Command::Info;
-      commandSet = true;
+      job.command = Command::kInfo;
+      command_set = true;
     } else if (argument == L"--fix-relocs") {
-      job.fixRelocations = true;
+      job.fix_relocations = true;
     } else if (argument == L"--data-sections") {
-      job.createDataSections = true;
+      job.create_data_sections = true;
     } else if (argument == L"--no-scylla") {
-      job.useScyllaHide = false;
+      job.use_scylla_hide = false;
     } else if (argument == L"--force") {
       force = true;
     } else if (argument == L"--pid") {
-      if (i + 1 >= argumentCount) {
+      if (i + 1 >= argument_count) {
         CliWrite("error: --pid needs a value\n");
         return 2;
       }
@@ -1514,11 +1523,11 @@ int RunCommandLine(int argumentCount, wchar_t** arguments) {
     }
   }
 
-  if (!commandSet || job.target.empty()) {
+  if (!command_set || job.target.empty()) {
     PrintUsage();
     return 2;
   }
-  if (job.command == Command::DumpCode && job.pid == 0) {
+  if (job.command == Command::kDumpCode && job.pid == 0) {
     CliWrite("error: --dumpcode needs --pid\n");
     return 2;
   }
@@ -1530,38 +1539,38 @@ int RunCommandLine(int argumentCount, wchar_t** arguments) {
   std::wstring error;
   uint16_t machine = 0;
   if (!ResolveJob(&job, &machine, &error)) {
-    Log(ltFatal, WideToUtf8(error));
+    Log(kLogFatal, WideToUtf8(error));
     return 1;
   }
 
-  PEFlags flags;
+  PeFlags flags;
   try {
-    flags = ReadPEFlags(job.target);
+    flags = ReadPeFlags(job.target);
   } catch (...) {
   }
 
-  if (job.fixRelocations && !flags.isDll) {
-    Log(ltWarning, "--fix-relocs is only applied to DLL targets.");
-    job.fixRelocations = false;
+  if (job.fix_relocations && !flags.is_dll) {
+    Log(kLogWarning, "--fix-relocs is only applied to DLL targets.");
+    job.fix_relocations = false;
   }
-  if (job.fixRelocations && job.command != Command::Unpack &&
-      job.command != Command::Shrink) {
-    Log(ltWarning, "--fix-relocs only applies to Unpack and Shrink.");
-    job.fixRelocations = false;
+  if (job.fix_relocations && job.command != Command::kUnpack &&
+      job.command != Command::kShrink) {
+    Log(kLogWarning, "--fix-relocs only applies to Unpack and Shrink.");
+    job.fix_relocations = false;
   }
-  if (job.createDataSections && job.command != Command::Unpack) {
-    Log(ltWarning, "--data-sections only applies to Unpack.");
-    job.createDataSections = false;
+  if (job.create_data_sections && job.command != Command::kUnpack) {
+    Log(kLogWarning, "--data-sections only applies to Unpack.");
+    job.create_data_sections = false;
   }
-  if (job.createDataSections && machine != IMAGE_FILE_MACHINE_I386) {
-    Log(ltWarning, "--data-sections is only available for 32-bit targets.");
-    job.createDataSections = false;
+  if (job.create_data_sections && machine != IMAGE_FILE_MACHINE_I386) {
+    Log(kLogWarning, "--data-sections is only available for 32-bit targets.");
+    job.create_data_sections = false;
   }
 
-  if (job.command == Command::Unpack) {
+  if (job.command == Command::kUnpack) {
     const std::wstring output = MakeUnpackedFileName(job.target);
     if (FileExists(output) && !force) {
-      LogF(ltFatal,
+      LogF(kLogFatal,
            "The output file already exists: %s (use --force to overwrite).",
            WideToUtf8(output).c_str());
       return 1;
@@ -1571,64 +1580,63 @@ int RunCommandLine(int argumentCount, wchar_t** arguments) {
   return ExecuteJob(job) ? 0 : 1;
 }
 
-int RunWorkerMode(int argumentCount, wchar_t** arguments) {
-  if (argumentCount < 9) {
+int RunWorkerMode(int argument_count, wchar_t** arguments) {
+  if (argument_count < 9) {
     return 2;
   }
 
   const int command = _wtoi(arguments[2]);
-  if (command < static_cast<int>(Command::Unpack) ||
-      command > static_cast<int>(Command::Info)) {
+  if (command < static_cast<int>(Command::kUnpack) ||
+      command > static_cast<int>(Command::kInfo)) {
     return 2;
   }
 
   Job job;
   job.command = static_cast<Command>(command);
   job.pid = static_cast<DWORD>(wcstoul(arguments[3], nullptr, 10));
-  job.createDataSections = wcscmp(arguments[4], L"1") == 0;
-  job.useScyllaHide = wcscmp(arguments[5], L"0") != 0;
-  job.fixRelocations = wcscmp(arguments[6], L"1") == 0;
-  const std::wstring cancelName = arguments[7];
+  job.create_data_sections = wcscmp(arguments[4], L"1") == 0;
+  job.use_scylla_hide = wcscmp(arguments[5], L"0") != 0;
+  job.fix_relocations = wcscmp(arguments[6], L"1") == 0;
+  const std::wstring cancel_name = arguments[7];
   job.target = arguments[8];
-  job.useWorker = false;
+  job.use_worker = false;
 
-  HANDLE cancelEvent = nullptr;
-  if (!cancelName.empty() && cancelName != L"-") {
-    cancelEvent = OpenEventW(SYNCHRONIZE, FALSE, cancelName.c_str());
-    if (cancelEvent == nullptr) {
-      LogF(ltWarning, "Could not open the cancellation event (error %lu).",
+  HANDLE cancel_event = nullptr;
+  if (!cancel_name.empty() && cancel_name != L"-") {
+    cancel_event = OpenEventW(SYNCHRONIZE, FALSE, cancel_name.c_str());
+    if (cancel_event == nullptr) {
+      LogF(kLogWarning, "Could not open the cancellation event (error %lu).",
            GetLastError());
     }
   }
 
-  SetCancellationEvent(cancelEvent);
+  SetCancellationEvent(cancel_event);
   SetStatusReporter(WorkerStatusSink);
   SetLog(WorkerLogSink);
   const bool success = ExecuteJob(job);
   SetStatusReporter(nullptr);
   SetCancellationEvent(nullptr);
-  if (cancelEvent != nullptr) {
-    CloseHandle(cancelEvent);
+  if (cancel_event != nullptr) {
+    CloseHandle(cancel_event);
   }
   return success ? 0 : 1;
 }
 
 }  // namespace
 
-int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/,
-                   int showCommand) {
-  int argumentCount = 0;
-  LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
-  if (arguments != nullptr && argumentCount >= 2 &&
+extern "C" int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/,
+                              LPSTR /*cmdLine*/, int show_command) {
+  int argument_count = 0;
+  LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
+  if (arguments != nullptr && argument_count >= 2 &&
       _wcsicmp(arguments[1], L"--worker") == 0) {
-    const int result = RunWorkerMode(argumentCount, arguments);
+    const int result = RunWorkerMode(argument_count, arguments);
     LocalFree(arguments);
     return result;
   }
 
-  if (arguments != nullptr && argumentCount >= 2 &&
-      arguments[1][0] == L'-') {
-    const int result = RunCommandLine(argumentCount, arguments);
+  if (arguments != nullptr && argument_count >= 2 && arguments[1][0] == L'-') {
+    const int result = RunCommandLine(argument_count, arguments);
     LocalFree(arguments);
     return result;
   }
@@ -1645,77 +1653,73 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
   SetProcessDPIAware();
   DisableVisualStyles();
 
-  g_app.instance = instance;
+  App().instance = instance;
 
   HDC screen = GetDC(nullptr);
-  g_dpi = screen != nullptr ? GetDeviceCaps(screen, LOGPIXELSY) : 96;
+  DpiScale() = screen != nullptr ? GetDeviceCaps(screen, LOGPIXELSY) : 96;
   if (screen != nullptr) {
     ReleaseDC(nullptr, screen);
   }
 
   HMENU menu = CreateMenu();
-  HMENU fileMenu = CreatePopupMenu();
-  AppendMenuW(fileMenu, MF_STRING, IDM_OPEN, L"&Open...\tCtrl+O");
-  AppendMenuW(fileMenu, MF_STRING, IDM_CLEAR_LOG, L"&Clear log");
-  AppendMenuW(fileMenu, MF_STRING, IDM_SAVE_LOG, L"&Save log...\tCtrl+S");
-  AppendMenuW(fileMenu, MF_STRING, IDM_COPY_LOG, L"&Copy log");
-  AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(fileMenu, MF_STRING, IDM_EXIT, L"E&xit");
-  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"&File");
+  HMENU file_menu = CreatePopupMenu();
+  AppendMenuW(file_menu, MF_STRING, kMenuOpen, L"&Open...\tCtrl+O");
+  AppendMenuW(file_menu, MF_STRING, kMenuClearLog, L"&Clear log");
+  AppendMenuW(file_menu, MF_STRING, kMenuSaveLog, L"&Save log...\tCtrl+S");
+  AppendMenuW(file_menu, MF_STRING, kMenuCopyLog, L"&Copy log");
+  AppendMenuW(file_menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenuW(file_menu, MF_STRING, kMenuExit, L"E&xit");
+  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(file_menu), L"&File");
 
-  HMENU advancedMenu = CreatePopupMenu();
-  AppendMenuW(advancedMenu, MF_STRING, IDM_ADV_DATA_SECTIONS,
+  HMENU advanced_menu = CreatePopupMenu();
+  AppendMenuW(advanced_menu, MF_STRING, kMenuAdvDataSections,
               L"&Create data sections");
-  AppendMenuW(advancedMenu, MF_STRING, IDM_ADV_NO_SCYLLA,
+  AppendMenuW(advanced_menu, MF_STRING, kMenuAdvNoScylla,
               L"&Disable ScyllaHide");
-  AppendMenuW(advancedMenu, MF_STRING, IDM_ADV_FIX_RELOCS,
+  AppendMenuW(advanced_menu, MF_STRING, kMenuAdvFixRelocs,
               L"&Fix DLL relocations");
-  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedMenu),
+  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(advanced_menu),
               L"&Advanced");
-  g_app.menu = menu;
-  g_app.advancedMenu = advancedMenu;
+  App().menu = menu;
+  App().advanced_menu = advanced_menu;
 
-  HMENU helpMenu = CreatePopupMenu();
-  AppendMenuW(helpMenu, MF_STRING, IDM_ABOUT, L"&About");
-  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), L"&Help");
+  HMENU help_menu = CreatePopupMenu();
+  AppendMenuW(help_menu, MF_STRING, kMenuAbout, L"&About");
+  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(help_menu), L"&Help");
 
-  WNDCLASSEXW windowClass{};
-  windowClass.cbSize = sizeof(windowClass);
-  windowClass.style = CS_HREDRAW | CS_VREDRAW;
-  windowClass.lpfnWndProc = WndProc;
-  windowClass.hInstance = instance;
-  windowClass.hIcon = LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
-  windowClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
-  windowClass.hbrBackground =
-      reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
-  windowClass.lpszClassName = kWindowClass;
-  windowClass.hIconSm = windowClass.hIcon;
+  WNDCLASSEXW window_class{};
+  window_class.cbSize = sizeof(window_class);
+  window_class.style = CS_HREDRAW | CS_VREDRAW;
+  window_class.lpfnWndProc = WndProc;
+  window_class.hInstance = instance;
+  window_class.hIcon = LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
+  window_class.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
+  window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
+  window_class.lpszClassName = kWindowClass;
+  window_class.hIconSm = window_class.hIcon;
 
-  if (RegisterClassExW(&windowClass) == 0) {
+  if (RegisterClassExW(&window_class) == 0) {
     return 1;
   }
 
-  const int maxWindowWidth =
-      GetSystemMetrics(SM_CXSCREEN) - Dip(40);
-  const int maxWindowHeight =
-      GetSystemMetrics(SM_CYSCREEN) - Dip(80);
-  const int windowWidth = std::min(Dip(900), maxWindowWidth);
-  const int windowHeight = std::min(Dip(430), maxWindowHeight);
+  const int max_window_width = GetSystemMetrics(SM_CXSCREEN) - Dip(40);
+  const int max_window_height = GetSystemMetrics(SM_CYSCREEN) - Dip(80);
+  const int window_width = std::min(Dip(900), max_window_width);
+  const int window_height = std::min(Dip(430), max_window_height);
 
   // Fixed-size classic window: no thick frame and no maximize box.
-  HWND hwnd = CreateWindowExW(
-      0, kWindowClass, kWindowTitle,
-      WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
-          WS_CLIPCHILDREN,
-      CW_USEDEFAULT, CW_USEDEFAULT, windowWidth, windowHeight, nullptr, menu,
-      instance, nullptr);
+  HWND hwnd = CreateWindowExW(0, kWindowClass, kWindowTitle,
+                              WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU |
+                                  WS_MINIMIZEBOX | WS_CLIPCHILDREN,
+                              CW_USEDEFAULT, CW_USEDEFAULT, window_width,
+                              window_height, nullptr, menu, instance, nullptr);
   if (hwnd == nullptr) {
     return 1;
   }
 
   if (arguments != nullptr) {
-    if (argumentCount >= 2 && arguments[1][0] != L'-') {
-      SetWindowTextW(g_app.target, arguments[1]);
+    if (argument_count >= 2 && arguments[1][0] != L'-') {
+      SetWindowTextW(App().target, arguments[1]);
     }
     LocalFree(arguments);
     arguments = nullptr;
@@ -1725,24 +1729,24 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
   ACCEL accelerator[2]{};
   accelerator[0].fVirt = FVIRTKEY | FCONTROL;
   accelerator[0].key = 'O';
-  accelerator[0].cmd = IDM_OPEN;
+  accelerator[0].cmd = kMenuOpen;
   accelerator[1].fVirt = FVIRTKEY | FCONTROL;
   accelerator[1].key = 'S';
-  accelerator[1].cmd = IDM_SAVE_LOG;
-  g_app.accel = CreateAcceleratorTableW(accelerator, 2);
+  accelerator[1].cmd = kMenuSaveLog;
+  App().accel = CreateAcceleratorTableW(accelerator, 2);
 
   SetLog(GuiLogSink);
   SetStatusReporter(GuiStatusSink);
-  LogF(ltInfo, "Magicmida %s GUI ready. ScyllaHide %s embedded.",
+  LogF(kLogInfo, "Magicmida %s GUI ready. ScyllaHide %s embedded.",
        MAGICMIDA_VERSION, scyllahide::Version());
 
-  ShowWindow(hwnd, showCommand);
+  ShowWindow(hwnd, show_command);
   UpdateWindow(hwnd);
 
   MSG message{};
   while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-    if (g_app.accel == nullptr ||
-        !TranslateAcceleratorW(hwnd, g_app.accel, &message)) {
+    if (App().accel == nullptr ||
+        !TranslateAcceleratorW(hwnd, App().accel, &message)) {
       TranslateMessage(&message);
       DispatchMessageW(&message);
     }
@@ -1750,3 +1754,4 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE /*previous*/, LPSTR /*cmdLine*/
 
   return static_cast<int>(message.wParam);
 }
+}  // namespace magicmida
