@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // API set (OneCoreUAP) lookup, generated from OneCoreUAP.pas.
-#pragma once
+#ifndef MAGICMIDA_ONECORE_UAP_H_
+#define MAGICMIDA_ONECORE_UAP_H_
 
 #include <string>
 
@@ -10,3 +11,5 @@ namespace magicmida {
 std::string GetOneCoreUAPModuleByAPI(const std::string& api);
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_ONECORE_UAP_H_

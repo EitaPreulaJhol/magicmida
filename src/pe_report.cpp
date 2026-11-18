@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace magicmida {
@@ -131,16 +133,14 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
     result.checksum = optional->CheckSum;
     result.dllCharacteristics = optional->DllCharacteristics;
     if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_BASERELOC) {
-      result.relocRva =
-          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
-              .VirtualAddress;
+      result.relocRva = optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
+                            .VirtualAddress;
       result.relocSize =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
     }
     if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_IMPORT) {
       result.importRva =
-          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
-              .VirtualAddress;
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
       result.importSize =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
     }
@@ -158,16 +158,14 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
     result.checksum = optional->CheckSum;
     result.dllCharacteristics = optional->DllCharacteristics;
     if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_BASERELOC) {
-      result.relocRva =
-          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
-              .VirtualAddress;
+      result.relocRva = optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
+                            .VirtualAddress;
       result.relocSize =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
     }
     if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_IMPORT) {
       result.importRva =
-          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
-              .VirtualAddress;
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
       result.importSize =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
     }
@@ -175,9 +173,10 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
     throw std::runtime_error("Unknown optional header magic.");
   }
 
-  const size_t sectionOffset = optionalOffset + fileHeader->SizeOfOptionalHeader;
-  const size_t sectionSize =
-      sizeof(IMAGE_SECTION_HEADER) * static_cast<size_t>(fileHeader->NumberOfSections);
+  const size_t sectionOffset =
+      optionalOffset + fileHeader->SizeOfOptionalHeader;
+  const size_t sectionSize = sizeof(IMAGE_SECTION_HEADER) *
+                             static_cast<size_t>(fileHeader->NumberOfSections);
   if (sectionOffset + sectionSize > toRead) {
     throw std::runtime_error("Truncated section table.");
   }
@@ -227,8 +226,7 @@ void EmitPEInfo(const std::wstring& target,
 
   emit(Format("File:             %s", WideToUtf8(target).c_str()));
   emit(Format("Machine:          %s", MachineName(info.machine).c_str()));
-  emit(Format("Architecture:     %s",
-              ArchitectureName(info.machine).c_str()));
+  emit(Format("Architecture:     %s", ArchitectureName(info.machine).c_str()));
   emit(Format("Type:             %s", info.isDll ? "DLL" : "EXE"));
   emit(Format("Linker:           %u.%u", info.linkerMajor, info.linkerMinor));
   emit(Format("Timestamp:        0x%08X", info.timestamp));
@@ -254,11 +252,11 @@ void EmitPEInfo(const std::wstring& target,
     if (section.characteristics & IMAGE_SCN_MEM_EXECUTE) flags += "X";
     if (section.characteristics & IMAGE_SCN_CNT_CODE) flags += "C";
     if (section.characteristics & IMAGE_SCN_CNT_INITIALIZED_DATA) flags += "I";
-    if (section.characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA) flags += "U";
-    emit(Format("  %-8s %08X   %08X   %08X   %08X   %s",
-                section.name.c_str(), section.virtualAddress,
-                section.virtualSize, section.rawOffset, section.rawSize,
-                flags.c_str()));
+    if (section.characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA)
+      flags += "U";
+    emit(Format("  %-8s %08X   %08X   %08X   %08X   %s", section.name.c_str(),
+                section.virtualAddress, section.virtualSize, section.rawOffset,
+                section.rawSize, flags.c_str()));
   }
 }
 

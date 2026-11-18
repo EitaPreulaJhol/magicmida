@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // PE header manipulation (ported from PEInfo.pas).
-#pragma once
+#ifndef MAGICMIDA_PE_INFO_H_
+#define MAGICMIDA_PE_INFO_H_
 
 #include "common.h"
 #include "stream.h"
@@ -84,3 +85,5 @@ class PEHeader {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_PE_INFO_H_

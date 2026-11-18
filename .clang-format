@@ -1,0 +1,9 @@
+# Google C++ style, pinned for the project.  Keep include blocks stable
+# until the include-order cleanup is done in a dedicated change.
+BasedOnStyle: Google
+Standard: c++17
+ColumnLimit: 80
+AllowShortFunctionsOnASingleLine: Inline
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Preserve

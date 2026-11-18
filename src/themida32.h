@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // 32-bit Themida/WinLicense unpacking logic (ported from Themida.pas).
-#pragma once
+#ifndef MAGICMIDA_THEMIDA32_H_
+#define MAGICMIDA_THEMIDA32_H_
 
 #include "themida_common.h"
 
@@ -13,9 +14,9 @@ namespace magicmida {
 
 class ThemidaDebugger : public ThemidaCommon {
  public:
-  ThemidaDebugger(const std::wstring& executable, const std::wstring& parameters,
-                  bool createData, bool useScyllaHide = true,
-                  bool fixRelocations = false);
+  ThemidaDebugger(const std::wstring& executable,
+                  const std::wstring& parameters, bool createData,
+                  bool useScyllaHide = true, bool fixRelocations = false);
   ~ThemidaDebugger() override = default;
 
  protected:
@@ -28,7 +29,8 @@ class ThemidaDebugger : public ThemidaCommon {
   DWORD OnSinglestep(uintptr_t bpAddress) override;
   void OnHardwareBreakpoint(HANDLE hThread, uintptr_t bpAddress,
                             CONTEXT& context) override;
-  SoftBPAction OnSoftwareBreakpoint(HANDLE hThread, uintptr_t bpAddress) override;
+  SoftBPAction OnSoftwareBreakpoint(HANDLE hThread,
+                                    uintptr_t bpAddress) override;
 
  private:
   struct EFLRecord {
@@ -105,3 +107,5 @@ class ThemidaDebugger : public ThemidaCommon {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_THEMIDA32_H_

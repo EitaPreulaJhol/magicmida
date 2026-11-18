@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Post-processing of unpacked files (ported from Patcher.pas).
-#pragma once
+#ifndef MAGICMIDA_PATCHER_H_
+#define MAGICMIDA_PATCHER_H_
 
 #include "common.h"
 #include "pe_info.h"
@@ -55,3 +56,5 @@ class Patcher {
 void NormalizePEFile(const std::wstring& fileName);
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_PATCHER_H_

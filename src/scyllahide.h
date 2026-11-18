@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Embedded ScyllaHide integration.
-#pragma once
+#ifndef MAGICMIDA_SCYLLAHIDE_H_
+#define MAGICMIDA_SCYLLAHIDE_H_
 
 #include <windows.h>
 
@@ -68,3 +69,5 @@ void Stop();
 
 }  // namespace scyllahide
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_SCYLLAHIDE_H_

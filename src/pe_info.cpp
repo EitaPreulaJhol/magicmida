@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 namespace magicmida {
 namespace {
@@ -59,7 +62,8 @@ PEHeader::PEHeader(const uint8_t* data, size_t bufferSize) {
     throw std::runtime_error("PEHeader: truncated section table");
   }
 
-  const auto* section = reinterpret_cast<const IMAGE_SECTION_HEADER*>(data + sectionOffset);
+  const auto* section =
+      reinterpret_cast<const IMAGE_SECTION_HEADER*>(data + sectionOffset);
   sections_.resize(ntHeaders.FileHeader.NumberOfSections);
   if (sections_.empty()) {
     throw std::runtime_error("PEHeader: PE has no sections");
@@ -117,9 +121,8 @@ void PEHeader::DeleteSection(int index) {
       }
     }
     const uint32_t currentRaw = sections_[index].Header.PointerToRawData;
-    size = nextRaw > currentRaw
-               ? nextRaw - currentRaw
-               : sections_[index].Header.SizeOfRawData;
+    size = nextRaw > currentRaw ? nextRaw - currentRaw
+                                : sections_[index].Header.SizeOfRawData;
   }
 
   for (int i = static_cast<int>(sections_.size()) - 1; i >= index + 1; --i) {
@@ -158,7 +161,8 @@ void PEHeader::Sanitize() {
   }
 
   if (!sections_.empty()) {
-    ntHeaders.OptionalHeader.SizeOfHeaders = sections_[0].Header.PointerToRawData;
+    ntHeaders.OptionalHeader.SizeOfHeaders =
+        sections_[0].Header.PointerToRawData;
 #if !defined(_WIN64)
     // 32-bit packers sometimes merge .text/.data and clear WRITE from the
     // header; keep the old workaround there. On x64 a forced W+X .text is a
@@ -226,8 +230,7 @@ uint32_t PEHeader::TrimHugeSections(uint8_t* buf, uint32_t& iatRawAddr) {
 
       if (i < sections_.size() - 1) {
         const uint32_t nextRaw = sections_[i + 1].Header.PointerToRawData;
-        const uint32_t moveSize =
-            nextRaw < dumpSize_ ? dumpSize_ - nextRaw : 0;
+        const uint32_t moveSize = nextRaw < dumpSize_ ? dumpSize_ - nextRaw : 0;
         if (nextRaw >= sectionStart + newSectionSize) {
           std::memmove(buf + sectionStart + newSectionSize, buf + nextRaw,
                        moveSize);

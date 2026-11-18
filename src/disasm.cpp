@@ -3,6 +3,7 @@
 #include "disasm.h"
 
 #include <cstring>
+#include <stdexcept>
 
 namespace magicmida {
 

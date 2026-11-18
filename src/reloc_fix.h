@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Rebuilds base relocation tables for unpacked DLLs.
-#pragma once
+#ifndef MAGICMIDA_RELOC_FIX_H_
+#define MAGICMIDA_RELOC_FIX_H_
 
 #include <cstdint>
 #include <string>
@@ -16,3 +17,5 @@ namespace magicmida {
 bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase);
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_RELOC_FIX_H_

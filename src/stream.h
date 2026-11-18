@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Minimal TStream replacements (TFileStream / TMemoryStream).
-#pragma once
+#ifndef MAGICMIDA_STREAM_H_
+#define MAGICMIDA_STREAM_H_
 
 #include "common.h"
 
@@ -76,3 +77,5 @@ class MemoryStream final : public Stream {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_STREAM_H_

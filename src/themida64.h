@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // 64-bit Themida/WinLicense unpacking logic (ported from Themida64.pas).
-#pragma once
+#ifndef MAGICMIDA_THEMIDA64_H_
+#define MAGICMIDA_THEMIDA64_H_
 
 #include "themida_common.h"
 
@@ -13,8 +14,7 @@ class ThemidaDebugger64 : public ThemidaCommon {
  public:
   ThemidaDebugger64(const std::wstring& executable,
                     const std::wstring& parameters, bool createData,
-                    bool useScyllaHide = true,
-                    bool fixRelocations = false);
+                    bool useScyllaHide = true, bool fixRelocations = false);
   ~ThemidaDebugger64() override = default;
 
  protected:
@@ -27,7 +27,8 @@ class ThemidaDebugger64 : public ThemidaCommon {
   DWORD OnSinglestep(uintptr_t bpAddress) override;
   void OnHardwareBreakpoint(HANDLE hThread, uintptr_t bpAddress,
                             CONTEXT& context) override;
-  SoftBPAction OnSoftwareBreakpoint(HANDLE hThread, uintptr_t bpAddress) override;
+  SoftBPAction OnSoftwareBreakpoint(HANDLE hThread,
+                                    uintptr_t bpAddress) override;
 
  private:
   void DumpContext(DWORD threadId);
@@ -64,3 +65,5 @@ class ThemidaDebugger64 : public ThemidaCommon {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_THEMIDA64_H_

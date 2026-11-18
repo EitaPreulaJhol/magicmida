@@ -54,9 +54,9 @@ void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
     return;
   }
 
-  const VmStubInfo stub = ParseVmStub(
-      code, sizeof(code), static_cast<uint32_t>(oep - imageBase_),
-      static_cast<uint64_t>(imageBase_));
+  const VmStubInfo stub =
+      ParseVmStub(code, sizeof(code), static_cast<uint32_t>(oep - imageBase_),
+                  static_cast<uint64_t>(imageBase_));
 
   size_t prefixSize = 0;
   if (stub.kind == VmStubKind::PushJump) {
@@ -64,8 +64,7 @@ void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
   } else if (stub.kind == VmStubKind::PushPushJump) {
     prefixSize = 10;
   } else if (stub.kind != VmStubKind::DirectJump) {
-    Log(ltWarning,
-        "Anti-dump fix skipped: unsupported OEP stub layout.");
+    Log(ltWarning, "Anti-dump fix skipped: unsupported OEP stub layout.");
     return;
   }
   if (stub.targetRva == 0) {
@@ -94,7 +93,8 @@ void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
   NewCode newCode{};
 
   // VirtualProtect(ImageBase, $400, PAGE_READWRITE, OldProtect)
-  std::memcpy(newCode.PushArgs1, kPushArgsRwProtect, sizeof(kPushArgsRwProtect));
+  std::memcpy(newCode.PushArgs1, kPushArgsRwProtect,
+              sizeof(kPushArgsRwProtect));
   newCode.PushImgBase1 = static_cast<uint32_t>(imageBase_);
   newCode.CallInstr1 = 0x15FF;
   newCode.VirtualProtectAddr1 = virtualProtectIat;
@@ -120,8 +120,7 @@ void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
   newCode.PopStack = 0x58;
 
   // jmp vm: the final target comes from the parsed entry stub.
-  const uint32_t vmTarget =
-      static_cast<uint32_t>(imageBase_ + stub.targetRva);
+  const uint32_t vmTarget = static_cast<uint32_t>(imageBase_ + stub.targetRva);
   const uint32_t jmpAddress =
       static_cast<uint32_t>(oep + prefixSize + sizeof(NewCode));
   newCode.JmpInstr = 0xE9;

@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Debugger primitives: process creation, debug loop, HW/SW breakpoints.
-#pragma once
+#ifndef MAGICMIDA_DEBUGGER_CORE_H_
+#define MAGICMIDA_DEBUGGER_CORE_H_
 
 #include "common.h"
 
@@ -81,11 +82,15 @@ class DebuggerCore {
 
   // Hooks (original virtual methods).
   virtual void OnDebugStart(HANDLE& hPE, HANDLE hThread) = 0;
-  virtual DWORD OnAccessViolation(HANDLE hThread, const EXCEPTION_RECORD& exceptionRecord);
+  virtual DWORD OnAccessViolation(HANDLE hThread,
+                                  const EXCEPTION_RECORD& exceptionRecord);
   virtual void OnDLLLoad(const std::wstring& fileName, void* baseAddress);
-  virtual void OnHardwareBreakpoint(HANDLE hThread, uintptr_t bpAddress, CONTEXT& context) = 0;
-  virtual SoftBPAction OnSoftwareBreakpoint(HANDLE hThread, uintptr_t bpAddress) = 0;
-  virtual void OnUnsolicitedSoftwareBreakpoint(HANDLE hThread, uintptr_t bpAddress);
+  virtual void OnHardwareBreakpoint(HANDLE hThread, uintptr_t bpAddress,
+                                    CONTEXT& context) = 0;
+  virtual SoftBPAction OnSoftwareBreakpoint(HANDLE hThread,
+                                            uintptr_t bpAddress) = 0;
+  virtual void OnUnsolicitedSoftwareBreakpoint(HANDLE hThread,
+                                               uintptr_t bpAddress);
   virtual DWORD OnSinglestep(uintptr_t bpAddress);
 
   // State shared with the Themida-specific implementations.
@@ -132,3 +137,5 @@ class DebuggerCore {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_DEBUGGER_CORE_H_

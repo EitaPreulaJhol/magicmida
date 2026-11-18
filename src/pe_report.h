@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Human-readable PE information used by the GUI.
-#pragma once
+#ifndef MAGICMIDA_PE_REPORT_H_
+#define MAGICMIDA_PE_REPORT_H_
 
 #include <cstdint>
 #include <functional>
@@ -36,3 +37,5 @@ void VerifyDump(const std::wstring& target, bool isDll,
 bool ReadPEIsDll(const std::wstring& target);
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_PE_REPORT_H_

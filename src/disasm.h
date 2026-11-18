@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Thin wrapper around the bundled BeaEngine disassembler.
-#pragma once
+#ifndef MAGICMIDA_DISASM_H_
+#define MAGICMIDA_DISASM_H_
 
 #include "common.h"
 
@@ -130,10 +131,12 @@ struct DISASM {
 
 #pragma pack(pop)
 
-static_assert(sizeof(void*) == 4 || sizeof(void*) == 8, "Unsupported pointer size");
+static_assert(sizeof(void*) == 4 || sizeof(void*) == 8,
+              "Unsupported pointer size");
 static_assert(offsetof(DISASM, VirtualAddr) == (sizeof(void*) == 8 ? 8u : 4u),
               "DISASM layout mismatch");
-static_assert(offsetof(DISASM, CompleteInstr) == (sizeof(void*) == 8 ? 20u : 16u),
+static_assert(offsetof(DISASM, CompleteInstr) ==
+                  (sizeof(void*) == 8 ? 20u : 16u),
               "DISASM layout mismatch");
 static_assert(offsetof(DISASM, Archi) == (sizeof(void*) == 8 ? 84u : 80u),
               "DISASM layout mismatch");
@@ -151,9 +154,11 @@ static_assert(offsetof(DISASM, Prefix) == (sizeof(void*) == 8 ? 1024u : 1020u),
               "DISASM layout mismatch");
 static_assert(offsetof(DISASM, Error) == (sizeof(void*) == 8 ? 1052u : 1048u),
               "DISASM layout mismatch");
-static_assert(offsetof(TINSTRTYPE, AddrValue) == 48u, "INSTRTYPE layout mismatch");
+static_assert(offsetof(TINSTRTYPE, AddrValue) == 48u,
+              "INSTRTYPE layout mismatch");
 static_assert(offsetof(TOPTYPE, Memory) == 44u, "OPTYPE layout mismatch");
-static_assert(offsetof(TMEMORYTYPE, Displacement) == 20u, "MEMORYTYPE layout mismatch");
+static_assert(offsetof(TMEMORYTYPE, Displacement) == 20u,
+              "MEMORYTYPE layout mismatch");
 
 extern "C" int __stdcall Disasm(DISASM* disasm);
 extern "C" const char* __stdcall BeaEngineVersion();
@@ -163,9 +168,13 @@ extern "C" const char* __stdcall BeaEngineVersion();
 int DisasmCheck(DISASM& disasm);
 
 // Helpers used by the ported code.
-inline uintptr_t DisasmEip(const DISASM& disasm) { return disasm.EIP; }
+inline uintptr_t DisasmEip(const DISASM& disasm) {
+  return disasm.EIP;
+}
 inline int64_t DisasmMemoryDisplacement(const TOPTYPE& operand) {
   return operand.Memory.Displacement;
 }
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_DISASM_H_

@@ -2,6 +2,9 @@
 // Single-step tracer used while resolving protected IAT entries.
 #include "tracer.h"
 
+#include <stdexcept>
+#include <utility>
+
 namespace magicmida {
 
 Tracer::Tracer(DWORD processId, DWORD threadId, HANDLE threadHandle,
@@ -20,8 +23,8 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
   CONTEXT context{};
   context.ContextFlags = CONTEXT_CONTROL;
   if (!GetThreadContext(threadHandle_, &context)) {
-    throw std::runtime_error(Format("GetThreadContext failed (error %lu)",
-                                    GetLastError()));
+    throw std::runtime_error(
+        Format("GetThreadContext failed (error %lu)", GetLastError()));
   }
 
 #if defined(_WIN64)
@@ -31,8 +34,8 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
 #endif
   context.EFlags |= 0x100;  // Trap
   if (!SetThreadContext(threadHandle_, &context)) {
-    throw std::runtime_error(Format("SetThreadContext failed (error %lu)",
-                                    GetLastError()));
+    throw std::runtime_error(
+        Format("SetThreadContext failed (error %lu)", GetLastError()));
   }
 
   if (!ContinueDebugEvent(processId_, threadId_, DBG_CONTINUE)) {
@@ -53,14 +56,15 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
       if (error == ERROR_SEM_TIMEOUT) {
         continue;
       }
-      throw std::runtime_error(Format(
-          "WaitForDebugEvent failed during tracing (error %lu)", error));
+      throw std::runtime_error(
+          Format("WaitForDebugEvent failed during tracing (error %lu)", error));
     }
 
     if (debugEvent.dwThreadId != threadId_) {
       LogF(ltInfo, "Suspending spurious thread %lu", debugEvent.dwThreadId);
-      HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME, FALSE,
-                                 debugEvent.dwThreadId);  // 2 == THREAD_SUSPEND_RESUME
+      HANDLE thread =
+          OpenThread(THREAD_SUSPEND_RESUME, FALSE,
+                     debugEvent.dwThreadId);  // 2 == THREAD_SUSPEND_RESUME
       if (thread != nullptr && thread != INVALID_HANDLE_VALUE) {
         SuspendThread(thread);
         CloseHandle(thread);
@@ -72,8 +76,8 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
 
     switch (debugEvent.dwDebugEventCode) {
       case EXCEPTION_DEBUG_EVENT:
-        if (MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionCode ==
-            EXCEPTION_SINGLE_STEP) {
+        if (MM_EVENT_FIELD(debugEvent, Exception)
+                .ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
           status = OnSingleStep(debugEvent);
           if (status == DBG_CONTROL_BREAK) {
             // Leave the single-step event pending on purpose: the target
@@ -84,8 +88,10 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
         } else {
           throw std::runtime_error(Format(
               "Unexpected exception during tracing: %.8X at %p in thread %lu",
-              MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionCode,
-              MM_EVENT_FIELD(debugEvent, Exception).ExceptionRecord.ExceptionAddress,
+              MM_EVENT_FIELD(debugEvent, Exception)
+                  .ExceptionRecord.ExceptionCode,
+              MM_EVENT_FIELD(debugEvent, Exception)
+                  .ExceptionRecord.ExceptionAddress,
               debugEvent.dwThreadId));
         }
         break;
@@ -110,8 +116,8 @@ DWORD Tracer::OnSingleStep(const DEBUG_EVENT& /*debugEvent*/) {
   CONTEXT context{};
   context.ContextFlags = CONTEXT_CONTROL;
   if (!GetThreadContext(threadHandle_, &context)) {
-    throw std::runtime_error(Format("GetThreadContext failed (error %lu)",
-                                    GetLastError()));
+    throw std::runtime_error(
+        Format("GetThreadContext failed (error %lu)", GetLastError()));
   }
 
   DWORD result = DBG_CONTINUE;
@@ -121,8 +127,8 @@ DWORD Tracer::OnSingleStep(const DEBUG_EVENT& /*debugEvent*/) {
 
   context.EFlags |= 0x100;
   if (!SetThreadContext(threadHandle_, &context)) {
-    throw std::runtime_error(Format("SetThreadContext failed (error %lu)",
-                                    GetLastError()));
+    throw std::runtime_error(
+        Format("SetThreadContext failed (error %lu)", GetLastError()));
   }
   return result;
 }

@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
+#include <vector>
 
 namespace magicmida {
 namespace {
@@ -21,7 +23,8 @@ DWORD ToMoveMethod(Stream::Origin origin) {
 }
 
 [[noreturn]] void ThrowLastError(const char* what) {
-  throw std::runtime_error(Format("%s failed (error %lu)", what, GetLastError()));
+  throw std::runtime_error(
+      Format("%s failed (error %lu)", what, GetLastError()));
 }
 
 }  // namespace
@@ -31,11 +34,12 @@ void Stream::CopyFrom(Stream& source, int64_t count) {
     return;
   }
 
-  std::vector<uint8_t> chunk(static_cast<size_t>(std::min<int64_t>(count, 64 * 1024)));
+  std::vector<uint8_t> chunk(
+      static_cast<size_t>(std::min<int64_t>(count, 64 * 1024)));
   int64_t remaining = count;
   while (remaining > 0) {
-    const size_t toRead =
-        static_cast<size_t>(std::min<int64_t>(remaining, static_cast<int64_t>(chunk.size())));
+    const size_t toRead = static_cast<size_t>(
+        std::min<int64_t>(remaining, static_cast<int64_t>(chunk.size())));
     source.Read(chunk.data(), toRead);
     Write(chunk.data(), toRead);
     remaining -= static_cast<int64_t>(toRead);
@@ -169,8 +173,8 @@ void MemoryStream::Read(void* buffer, size_t size) {
   if (size == 0) {
     return;
   }
-  if (position_ < 0 ||
-      static_cast<uint64_t>(position_) + size > static_cast<uint64_t>(buffer_.size())) {
+  if (position_ < 0 || static_cast<uint64_t>(position_) + size >
+                           static_cast<uint64_t>(buffer_.size())) {
     throw std::runtime_error("MemoryStream read out of bounds");
   }
   std::memcpy(buffer, buffer_.data() + position_, size);
@@ -215,7 +219,8 @@ int64_t MemoryStream::Size() {
 
 void MemoryStream::SetSize(int64_t size) {
   buffer_.resize(static_cast<size_t>(std::max<int64_t>(size, 0)));
-  position_ = std::min<int64_t>(position_, static_cast<int64_t>(buffer_.size()));
+  position_ =
+      std::min<int64_t>(position_, static_cast<int64_t>(buffer_.size()));
 }
 
 void MemoryStream::SetPosition(int64_t position) {

@@ -1,0 +1,31 @@
+name: style
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  clang-format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: pip install clang-format==14.0.6
+
+      - name: Check formatting
+        run: clang-format --dry-run --Werror src/*.cpp src/*.h src/*.inc
+
+  cpplint:
+    name: cpplint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cpplint
+        run: pip install cpplint==2.0.2
+
+      - name: Run cpplint
+        run: cpplint --recursive src

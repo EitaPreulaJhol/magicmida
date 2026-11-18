@@ -8,6 +8,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace magicmida {
 namespace {
@@ -28,7 +32,7 @@ ThemidaDebugger64::ThemidaDebugger64(const std::wstring& executable,
   createDataSections_ = createData;  // Currently does nothing.
   useScyllaHide_ = useScyllaHide;
   fixRelocations_ = fixRelocations;
-  themidaV3_ = true;                 // Themida V2 is not supported on x64 atm.
+  themidaV3_ = true;  // Themida V2 is not supported on x64 atm.
 }
 
 bool ThemidaDebugger64::InImageBounds(uintptr_t address) const {
@@ -42,8 +46,8 @@ bool ThemidaDebugger64::InImageBounds(uintptr_t address) const {
 void ThemidaDebugger64::SelectThemidaSection(uintptr_t address) {
   for (const IMAGE_SECTION_HEADER& section : peSections_) {
     if (address >= section.VirtualAddress + imageBase_ &&
-        address < section.VirtualAddress + section.Misc.VirtualSize +
-                      imageBase_) {
+        address <
+            section.VirtualAddress + section.Misc.VirtualSize + imageBase_) {
       tmSectR_ = MemoryRegion(section.VirtualAddress + imageBase_,
                               section.Misc.VirtualSize);
       tmSectStorage_ = std::make_unique<uint8_t[]>(tmSectR_.Size);
@@ -59,9 +63,8 @@ void ThemidaDebugger64::SelectThemidaSection(uintptr_t address) {
   }
 
   if (tmSect_ == nullptr) {
-    throw std::runtime_error(
-        Format("Unable to find section for %llX",
-               static_cast<unsigned long long>(address)));
+    throw std::runtime_error(Format("Unable to find section for %llX",
+                                    static_cast<unsigned long long>(address)));
   }
 }
 
@@ -72,8 +75,7 @@ void ThemidaDebugger64::OnDebugStart(HANDLE& hPE, HANDLE hThread) {
                            scyllahide::DefaultProfile(), &scyllaError)) {
       throw std::runtime_error("ScyllaHide injection failed: " + scyllaError);
     }
-    LogF(ltGood, "Applying embedded ScyllaHide (%s)",
-         scyllahide::Version());
+    LogF(ltGood, "Applying embedded ScyllaHide (%s)", scyllahide::Version());
   } else {
     Log(ltWarning,
         "ScyllaHide disabled by the Disable ScyllaHide option; Themida64 may "
@@ -104,10 +106,11 @@ void ThemidaDebugger64::OnDLLLoad(const std::wstring& fileName,
   const std::string lowered = AsciiLowerCase(WideToUtf8(fileName));
   if (lowered.find("\\mscoree.dll") != std::string::npos) {
     Log(ltInfo, "This might be a .NET program - setting _CorExeMain BP");
-    const HMODULE hCorEE = LoadLibraryW(L"mscoree.dll");  // Load in this process
+    const HMODULE hCorEE =
+        LoadLibraryW(L"mscoree.dll");  // Load in this process
     if (hCorEE == baseAddress) {
-      corExeMain_ = reinterpret_cast<void*>(
-          GetProcAddress(hCorEE, "_CorExeMain"));
+      corExeMain_ =
+          reinterpret_cast<void*>(GetProcAddress(hCorEE, "_CorExeMain"));
       SetSoftBP(reinterpret_cast<uintptr_t>(corExeMain_));
     } else {
       Log(ltFatal, "DLL was loaded at different base than in target!");
@@ -166,10 +169,9 @@ void ThemidaDebugger64::OnHardwareBreakpoint(HANDLE /*hThread*/,
 DWORD ThemidaDebugger64::OnSinglestep(uintptr_t bpAddress) {
   if (guardStepping_) {
     DWORD oldProtect = 0;
-    if (!VirtualProtectEx(process_.hProcess,
-                          reinterpret_cast<void*>(guardStart_),
-                          guardEnd_ - guardStart_, PAGE_NOACCESS,
-                          &oldProtect)) {
+    if (!VirtualProtectEx(
+            process_.hProcess, reinterpret_cast<void*>(guardStart_),
+            guardEnd_ - guardStart_, PAGE_NOACCESS, &oldProtect)) {
       throw std::runtime_error(
           Format("VirtualProtectEx failed (error %lu)", GetLastError()));
     }
@@ -242,8 +244,7 @@ void ThemidaDebugger64::TMInit(HANDLE& hPE) {
     hPE = CreateFileW(executable_.c_str(), GENERIC_READ, FILE_SHARE_READ,
                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hPE == INVALID_HANDLE_VALUE) {
-      throw std::runtime_error(
-          Format("CreateFile code %lu", GetLastError()));
+      throw std::runtime_error(Format("CreateFile code %lu", GetLastError()));
     }
   }
 
@@ -256,8 +257,8 @@ void ThemidaDebugger64::TMInit(HANDLE& hPE) {
         Format("ReadFile failed! Code: %lu", GetLastError()));
   }
 
-  const uint64_t ntOffset =
-      static_cast<uint64_t>(reinterpret_cast<IMAGE_DOS_HEADER*>(buffer)->e_lfanew);
+  const uint64_t ntOffset = static_cast<uint64_t>(
+      reinterpret_cast<IMAGE_DOS_HEADER*>(buffer)->e_lfanew);
   if (ntOffset + sizeof(IMAGE_NT_HEADERS) > sizeof(buffer)) {
     throw std::runtime_error("Truncated NT headers");
   }
@@ -283,18 +284,16 @@ void ThemidaDebugger64::TMInit(HANDLE& hPE) {
 
   // PE header antidump.
   if (sections[2].Name[0] == 'i') {
-    const uintptr_t test =
-        reinterpret_cast<uintptr_t>(&sections[2].Name[0]) -
-        reinterpret_cast<uintptr_t>(buffer) + imageBase_;
+    const uintptr_t test = reinterpret_cast<uintptr_t>(&sections[2].Name[0]) -
+                           reinterpret_cast<uintptr_t>(buffer) + imageBase_;
     DWORD oldProtect = 0;
     VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(test), 1,
                      PAGE_READWRITE, &oldProtect);
     uint32_t value = 'p';
     if (!WriteProcessMemory(process_.hProcess, reinterpret_cast<void*>(test),
                             &value, 1, nullptr)) {
-      throw std::runtime_error(
-          Format("Fixing PE header antidump failed! Code: %lu",
-                 GetLastError()));
+      throw std::runtime_error(Format(
+          "Fixing PE header antidump failed! Code: %lu", GetLastError()));
     }
   }
 
@@ -352,15 +351,17 @@ bool ThemidaDebugger64::IsGuardedAddress(uintptr_t address) {
 
 DWORD ThemidaDebugger64::ProcessGuardedAccess(
     HANDLE hThread, const EXCEPTION_RECORD& exceptionRecord) {
-  LogF(ltInfo, "[Guard] %s %llX",
-       AccessViolationFlagToStr(
-           static_cast<uint8_t>(exceptionRecord.ExceptionInformation[0]))
-           .c_str(),
-       static_cast<unsigned long long>(exceptionRecord.ExceptionInformation[1]));
+  LogF(
+      ltInfo, "[Guard] %s %llX",
+      AccessViolationFlagToStr(
+          static_cast<uint8_t>(exceptionRecord.ExceptionInformation[0]))
+          .c_str(),
+      static_cast<unsigned long long>(exceptionRecord.ExceptionInformation[1]));
 
   DWORD oldProtect = 0;
   VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(guardStart_),
-                   guardEnd_ - guardStart_, PAGE_EXECUTE_READWRITE, &oldProtect);
+                   guardEnd_ - guardStart_, PAGE_EXECUTE_READWRITE,
+                   &oldProtect);
 
   const uintptr_t exceptionAddress =
       reinterpret_cast<uintptr_t>(exceptionRecord.ExceptionAddress);
@@ -460,9 +461,8 @@ DWORD ThemidaDebugger64::ProcessGuardedAccess(
 uintptr_t ThemidaDebugger64::TryFindCorrectOEP(uintptr_t hitAddress) {
   uintptr_t result = hitAddress;
   if (majorLinkerVersion_ != 8 && majorLinkerVersion_ != 9 &&
-      majorLinkerVersion_ != 10 &&
-      majorLinkerVersion_ != 11 && majorLinkerVersion_ != 12 &&
-      majorLinkerVersion_ != 14) {
+      majorLinkerVersion_ != 10 && majorLinkerVersion_ != 11 &&
+      majorLinkerVersion_ != 12 && majorLinkerVersion_ != 14) {
     Log(ltFatal,
         "Don't know what to do about OEP for this compiler. Your target "
         "likely won't run.");
@@ -477,8 +477,8 @@ uintptr_t ThemidaDebugger64::TryFindCorrectOEP(uintptr_t hitAddress) {
   RPM(imageBase_ + peSections_[0].VirtualAddress, textBuffer.data(),
       textBuffer.size());
 
-  const uint32_t scanFor = static_cast<uint32_t>(
-      hitAddress - imageBase_ - peSections_[0].VirtualAddress);
+  const uint32_t scanFor = static_cast<uint32_t>(hitAddress - imageBase_ -
+                                                 peSections_[0].VirtualAddress);
   for (uint32_t i = 0; i + 10 <= textLen; ++i) {
     if (textBuffer[i] == 0xE8 && textBuffer[i + 5] == 0xE9 &&
         *reinterpret_cast<const uint32_t*>(textBuffer.data() + i + 1) + i + 5 ==

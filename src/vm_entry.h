@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Recognition of Oreans/Themida/WinLicense virtual-machine entry stubs.
-#pragma once
+#ifndef MAGICMIDA_VM_ENTRY_H_
+#define MAGICMIDA_VM_ENTRY_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -38,3 +39,5 @@ VmStubInfo ParseVmStub(const uint8_t* code, size_t size, uint32_t stubRva,
                        uint64_t imageBase);
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_VM_ENTRY_H_

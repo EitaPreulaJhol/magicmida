@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -106,8 +109,8 @@ void Patcher::NormalizeLayout() {
     layout.oldSize = header.SizeOfRawData;
 
     if (header.SizeOfRawData != 0) {
-      const uint64_t end = static_cast<uint64_t>(header.PointerToRawData) +
-                           header.SizeOfRawData;
+      const uint64_t end =
+          static_cast<uint64_t>(header.PointerToRawData) + header.SizeOfRawData;
       if (end > oldFileSize) {
         throw std::runtime_error(
             "NormalizeLayout: section raw data extends past the file");
@@ -248,8 +251,7 @@ void Patcher::NormalizeLayout() {
   // IMAGE_DEBUG_DIRECTORY entries hold file offsets (hint: the CodeView
   // record), so they must follow the section data they describe.
   const IMAGE_DATA_DIRECTORY debugDirectory =
-      pe_->ntHeaders.OptionalHeader
-          .DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+      pe_->ntHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
   if (debugDirectory.VirtualAddress != 0 &&
       debugDirectory.Size >= sizeof(IMAGE_DEBUG_DIRECTORY)) {
     const PESection* debugSection =
@@ -257,14 +259,14 @@ void Patcher::NormalizeLayout() {
     if (debugSection != nullptr) {
       const uint64_t sectionStart = debugSection->Header.VirtualAddress;
       const uint64_t sectionEnd =
-          sectionStart + std::max<uint32_t>(
-                             debugSection->Header.Misc.VirtualSize,
+          sectionStart +
+          std::max<uint32_t>(debugSection->Header.Misc.VirtualSize,
                              debugSection->Header.SizeOfRawData);
-      const size_t debugIndex = static_cast<size_t>(
-          debugSection - pe_->Sections().data());
-      const uint64_t newDebugOffset = layouts[debugIndex].newRaw +
-                                      (debugDirectory.VirtualAddress -
-                                       sectionStart);
+      const size_t debugIndex =
+          static_cast<size_t>(debugSection - pe_->Sections().data());
+      const uint64_t newDebugOffset =
+          layouts[debugIndex].newRaw +
+          (debugDirectory.VirtualAddress - sectionStart);
       if (debugDirectory.VirtualAddress >= sectionStart &&
           static_cast<uint64_t>(debugDirectory.VirtualAddress) < sectionEnd &&
           layouts[debugIndex].newSize != 0 &&
@@ -275,8 +277,7 @@ void Patcher::NormalizeLayout() {
           auto* entry = reinterpret_cast<IMAGE_DEBUG_DIRECTORY*>(
               normalized.Memory() + newDebugOffset + offset);
           if (entry->PointerToRawData != 0) {
-            entry->PointerToRawData =
-                mapFileOffset(entry->PointerToRawData);
+            entry->PointerToRawData = mapFileOffset(entry->PointerToRawData);
           }
         }
       }
@@ -331,13 +332,11 @@ void Patcher::FlattenLayout() {
   MemoryStream flatStream;
   flatStream.SetSize(static_cast<int64_t>(fileSize));
   const uint32_t firstVA = sections[0].Header.VirtualAddress;
-  const uint64_t oldSizeOfHeaders =
-      pe_->ntHeaders.OptionalHeader.SizeOfHeaders;
+  const uint64_t oldSizeOfHeaders = pe_->ntHeaders.OptionalHeader.SizeOfHeaders;
   // Do not copy section bytes that happen to sit between SizeOfHeaders and
   // the first section RVA in a normalized layout.
-  const uint64_t headerCopy =
-      std::min<uint64_t>(oldFileSize,
-                         std::min<uint64_t>(firstVA, oldSizeOfHeaders));
+  const uint64_t headerCopy = std::min<uint64_t>(
+      oldFileSize, std::min<uint64_t>(firstVA, oldSizeOfHeaders));
   if (headerCopy != 0) {
     std::memcpy(flatStream.Memory(), stream_.Memory(),
                 static_cast<size_t>(headerCopy));
@@ -427,17 +426,15 @@ void Patcher::RelocateExceptionTable() {
   const IMAGE_SECTION_HEADER tableHeader = tableSection->Header;
   const std::string tableName = SectionName(tableHeader);
   const bool protectorSection =
-      tableName == ".themida" || tableName == ".boot" ||
-      tableName == ".tmd" || tableName == ".winlice" ||
-      tableName.rfind(".vmp", 0) == 0;
+      tableName == ".themida" || tableName == ".boot" || tableName == ".tmd" ||
+      tableName == ".winlice" || tableName.rfind(".vmp", 0) == 0;
   if (!protectorSection ||
       (tableHeader.Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0 ||
       tableHeader.SizeOfRawData == 0) {
     return;
   }
 
-  const uint32_t delta =
-      directory->VirtualAddress - tableHeader.VirtualAddress;
+  const uint32_t delta = directory->VirtualAddress - tableHeader.VirtualAddress;
   if (delta >= tableHeader.SizeOfRawData) {
     return;
   }
@@ -450,8 +447,8 @@ void Patcher::RelocateExceptionTable() {
 
   const uint64_t sectionStart = tableHeader.VirtualAddress;
   const uint64_t sectionEnd =
-      sectionStart + std::max<uint32_t>(
-                         static_cast<uint32_t>(tableHeader.Misc.VirtualSize),
+      sectionStart +
+      std::max<uint32_t>(static_cast<uint32_t>(tableHeader.Misc.VirtualSize),
                          static_cast<uint32_t>(tableHeader.SizeOfRawData));
   const auto inTableSection = [&](uint32_t rva) {
     return rva >= sectionStart && rva < sectionEnd;
@@ -461,8 +458,8 @@ void Patcher::RelocateExceptionTable() {
   table.reserve(directory->Size);
   const size_t count = directory->Size / 12;
   for (size_t i = 0; i < count; ++i) {
-    const uint8_t* entry = stream_.Memory() + tableOffset +
-                           static_cast<int64_t>(i) * 12;
+    const uint8_t* entry =
+        stream_.Memory() + tableOffset + static_cast<int64_t>(i) * 12;
     uint32_t begin = 0;
     uint32_t end = 0;
     uint32_t unwind = 0;
@@ -491,8 +488,7 @@ void Patcher::RelocateExceptionTable() {
   }
 
   const IMAGE_SECTION_HEADER previous = pe_->Sections().back().Header;
-  uint32_t virtualAddress =
-      previous.VirtualAddress + previous.Misc.VirtualSize;
+  uint32_t virtualAddress = previous.VirtualAddress + previous.Misc.VirtualSize;
   pe_->SectionAlign(virtualAddress);
 
   uint32_t rawOffset = static_cast<uint32_t>(stream_.Size());
@@ -543,19 +539,17 @@ void Patcher::RelocateExceptionTable() {
 }
 
 void Patcher::ShrinkPE() {
-  const uint32_t entryPoint =
-      pe_->ntHeaders.OptionalHeader.AddressOfEntryPoint;
+  const uint32_t entryPoint = pe_->ntHeaders.OptionalHeader.AddressOfEntryPoint;
   const uint64_t imageBase =
       static_cast<uint64_t>(pe_->ntHeaders.OptionalHeader.ImageBase);
 
   const auto isReferenced = [&](const IMAGE_SECTION_HEADER& header) {
     const uint64_t sectionStart = header.VirtualAddress;
     const uint64_t sectionEnd =
-        sectionStart + std::max<uint32_t>(
-                          static_cast<uint32_t>(header.Misc.VirtualSize),
-                          static_cast<uint32_t>(header.SizeOfRawData));
-    for (size_t index = 0; index < IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
-         ++index) {
+        sectionStart +
+        std::max<uint32_t>(static_cast<uint32_t>(header.Misc.VirtualSize),
+                           static_cast<uint32_t>(header.SizeOfRawData));
+    for (size_t index = 0; index < IMAGE_NUMBEROF_DIRECTORY_ENTRIES; ++index) {
       // The security directory holds a file offset, not an RVA.
       if (index == IMAGE_DIRECTORY_ENTRY_SECURITY) {
         continue;
@@ -587,7 +581,8 @@ void Patcher::ShrinkPE() {
   };
 
   // Maps an RVA inside a section's raw data to the file bytes.
-  const auto rvaBytes = [&](uint32_t rva, uint8_t* out, size_t count) -> size_t {
+  const auto rvaBytes = [&](uint32_t rva, uint8_t* out,
+                            size_t count) -> size_t {
     for (const PESection& section : pe_->Sections()) {
       const IMAGE_SECTION_HEADER& header = section.Header;
       if (rva < header.VirtualAddress ||
@@ -599,8 +594,7 @@ void Patcher::ShrinkPE() {
       const size_t bytes = std::min(count, available);
       const int64_t offset =
           static_cast<int64_t>(header.PointerToRawData) + delta;
-      if (offset < 0 ||
-          offset + static_cast<int64_t>(bytes) > stream_.Size()) {
+      if (offset < 0 || offset + static_cast<int64_t>(bytes) > stream_.Size()) {
         return 0;
       }
       std::memcpy(out, stream_.Memory() + offset, bytes);
@@ -623,8 +617,7 @@ void Patcher::ShrinkPE() {
     if (rva == 0 || rva >= pe_->SizeOfImage()) {
       return;
     }
-    if (std::find(vmTargets.begin(), vmTargets.end(), rva) ==
-        vmTargets.end()) {
+    if (std::find(vmTargets.begin(), vmTargets.end(), rva) == vmTargets.end()) {
       vmTargets.push_back(rva);
     }
   };
@@ -660,19 +653,16 @@ void Patcher::ShrinkPE() {
         static_cast<int64_t>(text.PointerToRawData) +
                 static_cast<int64_t>(text.SizeOfRawData) <=
             stream_.Size()) {
-      const uint8_t* data =
-          stream_.Memory() + text.PointerToRawData;
+      const uint8_t* data = stream_.Memory() + text.PointerToRawData;
       for (uint32_t offset = 0; offset + 5 <= text.SizeOfRawData; ++offset) {
         if (data[offset] != 0xE8 && data[offset] != 0xE9) {
           continue;
         }
         int32_t displacement = 0;
-        std::memcpy(&displacement, data + offset + 1,
-                    sizeof(displacement));
+        std::memcpy(&displacement, data + offset + 1, sizeof(displacement));
         const int64_t target = static_cast<int64_t>(text.VirtualAddress) +
                                offset + 5 + displacement;
-        if (target <= 0 ||
-            target >= static_cast<int64_t>(pe_->SizeOfImage())) {
+        if (target <= 0 || target >= static_cast<int64_t>(pe_->SizeOfImage())) {
           continue;
         }
         VmStubInfo stub = parseAt(static_cast<uint32_t>(target));
@@ -853,7 +843,8 @@ void Patcher::ShrinkExportSect() {
     return;
   }
 
-  uint8_t* const base = stream_.Memory() + exportSection->Header.PointerToRawData;
+  uint8_t* const base =
+      stream_.Memory() + exportSection->Header.PointerToRawData;
   uint8_t* const exportData =
       base + (directory->VirtualAddress - exportSection->Header.VirtualAddress);
 
@@ -871,8 +862,8 @@ void Patcher::ShrinkExportSect() {
   exportDirectory->AddressOfNameOrdinals -= difference;
 
   auto* names = reinterpret_cast<uint32_t*>(
-      base + (exportDirectory->AddressOfNames -
-              exportSection->Header.VirtualAddress));
+      base +
+      (exportDirectory->AddressOfNames - exportSection->Header.VirtualAddress));
   for (uint32_t i = 0; i < exportDirectory->NumberOfNames; ++i) {
     names[i] -= difference;
   }
@@ -880,8 +871,7 @@ void Patcher::ShrinkExportSect() {
   difference = exportSection->Header.SizeOfRawData - 0x1000;
   exportSection->Header.SizeOfRawData -= difference;
   for (PESection& section : pe_->Sections()) {
-    if (section.Header.VirtualAddress >
-        exportSection->Header.VirtualAddress) {
+    if (section.Header.VirtualAddress > exportSection->Header.VirtualAddress) {
       section.Header.PointerToRawData -= difference;
     }
   }
@@ -892,8 +882,7 @@ void Patcher::ShrinkExportSect() {
 
   stream_.SetPosition(0);
   MemoryStream newStream;
-  newStream.CopyFrom(stream_,
-                     exportSection->Header.PointerToRawData + 0x1000);
+  newStream.CopyFrom(stream_, exportSection->Header.PointerToRawData + 0x1000);
   stream_.Seek(difference, Stream::Origin::Current);
   newStream.CopyFrom(stream_, stream_.Size() - stream_.Position());
   stream_ = std::move(newStream);
@@ -912,9 +901,9 @@ bool Patcher::MapleCreateDataSections() {
 
   uintptr_t dataStart = 0;
   if (streamSize > 0x2000000) {
-    dataStart = FindStatic("10000000200000004000000060000000",
-                           memory + 0x2000000,
-                           static_cast<size_t>(streamSize - 0x2000000));
+    dataStart =
+        FindStatic("10000000200000004000000060000000", memory + 0x2000000,
+                   static_cast<size_t>(streamSize - 0x2000000));
   }
 
   if (dataStart == 0) {
@@ -935,7 +924,8 @@ bool Patcher::MapleCreateDataSections() {
           "2E3F41563F245A4C69737440554D4150494E464F4043416374696F6E4672616D6540"
           "404040",
           memory + kOldOffset,
-          static_cast<size_t>(streamSize - static_cast<int64_t>(kOldOffset)));  // TW 122+
+          static_cast<size_t>(streamSize -
+                              static_cast<int64_t>(kOldOffset)));  // TW 122+
       if (dataStartTw != 0 && dataStartTw < dataStart) {
         dataStart = dataStartTw;
       }
@@ -1040,9 +1030,8 @@ bool Patcher::MapleCreateDataSections() {
   dataSection.Header.VirtualAddress = static_cast<uint32_t>(dataStart);
   dataSection.Header.PointerToRawData = static_cast<uint32_t>(dataStart);
   dataSection.Header.SizeOfRawData = static_cast<uint32_t>(dataSize - zeroSize);
-  dataSection.Header.Characteristics = IMAGE_SCN_MEM_READ |
-                                       IMAGE_SCN_MEM_WRITE |
-                                       IMAGE_SCN_CNT_INITIALIZED_DATA;
+  dataSection.Header.Characteristics =
+      IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_CNT_INITIALIZED_DATA;
 
   // .rdata
   const uintptr_t rdataStart = pe_->ntHeaders.OptionalHeader.BaseOfData;
@@ -1115,8 +1104,7 @@ uintptr_t Patcher::FindDataStartMSVC6() {
   }
 
   cInitCode += 0x100000;
-  uintptr_t result = *reinterpret_cast<const uint32_t*>(
-      memory + cInitCode + 6);
+  uintptr_t result = *reinterpret_cast<const uint32_t*>(memory + cInitCode + 6);
   if ((result & 0xFFF) != 0) {
     result = 0;
   } else {
@@ -1139,9 +1127,8 @@ bool Patcher::FindDynTLSMSVC14(uintptr_t& dynTlsInit) {
   }
 
   uint8_t* const memory = stream_.Memory();
-  uint32_t dynTlsCode =
-      FindDynamic("8BF033FF393E74??56E8", memory + 0x1000,
-                  static_cast<size_t>(streamSize - 0x1000));
+  uint32_t dynTlsCode = FindDynamic("8BF033FF393E74??56E8", memory + 0x1000,
+                                    static_cast<size_t>(streamSize - 0x1000));
   if (dynTlsCode == 0) {
     Log(ltInfo, "DynTLS code sequence not found.");
     return false;
@@ -1156,8 +1143,8 @@ bool Patcher::FindDynTLSMSVC14(uintptr_t& dynTlsInit) {
   uint8_t* getPtrFunc =
       codePtr + *reinterpret_cast<const int32_t*>(codePtr - 4);
   if (*getPtrFunc == 0xE9) {  // another indirection via jmp
-    getPtrFunc = getPtrFunc +
-                 *reinterpret_cast<const int32_t*>(getPtrFunc + 1) + 5;
+    getPtrFunc =
+        getPtrFunc + *reinterpret_cast<const int32_t*>(getPtrFunc + 1) + 5;
   }
   if (*getPtrFunc != 0xB8) {
     Log(ltInfo, "DynTLS call analysis failed.");
@@ -1256,7 +1243,8 @@ bool Patcher::MSVCCreateDataSections() {
     pe_->Sections()[0].Header.SizeOfRawData -= rdataSize + dataSize;
 
     for (int i = 0; i < 3; ++i) {
-      const IMAGE_SECTION_HEADER& header = pe_->Sections()[static_cast<size_t>(i)].Header;
+      const IMAGE_SECTION_HEADER& header =
+          pe_->Sections()[static_cast<size_t>(i)].Header;
       LogF(ltInfo, "%s: %.8x ~ %.8x", SectionName(header).c_str(),
            header.VirtualAddress,
            header.VirtualAddress + header.Misc.VirtualSize);
@@ -1276,9 +1264,13 @@ bool Patcher::MapleCreateDataSections() {
       "Data section creation is not available for 64-bit binaries.");
 }
 
-uintptr_t Patcher::FindDataStartMSVC6() { return 0; }
+uintptr_t Patcher::FindDataStartMSVC6() {
+  return 0;
+}
 
-bool Patcher::FindDynTLSMSVC14(uintptr_t& /*dynTlsInit*/) { return false; }
+bool Patcher::FindDynTLSMSVC14(uintptr_t& /*dynTlsInit*/) {
+  return false;
+}
 
 bool Patcher::MSVCCreateDataSections() {
   throw std::runtime_error(
@@ -1300,8 +1292,7 @@ void Patcher::DumpProcessCode(HANDLE process) {
   // relocated (ASLR or an occupied base). Find the module by name and use its
   // real base instead.
   const std::wstring moduleFileName = ExtractFileName(fileName_);
-  const std::string targetName =
-      AsciiLowerCase(WideToUtf8(moduleFileName));
+  const std::string targetName = AsciiLowerCase(WideToUtf8(moduleFileName));
   bool moduleFound = false;
 
   HMODULE modules[1024]{};

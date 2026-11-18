@@ -8,11 +8,13 @@
 #include <windows.h>
 
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
+#include "HookLibrary/HookMain.h"
 #include "InjectorCLI/ApplyHooking.h"
 #include "InjectorCLI/DynamicMapping.h"
-#include "HookLibrary/HookMain.h"
 #include "Scylla/Logger.h"
 #include "Scylla/PebHider.h"
 #include "Scylla/User32Loader.h"
@@ -108,8 +110,8 @@ void LogProfile(const Profile& profile) {
 
 bool DebugLoggingEnabled() {
   wchar_t value[8]{};
-  const DWORD length =
-      GetEnvironmentVariableW(L"MAGICMIDA_SCYLLA_DEBUG", value, _countof(value));
+  const DWORD length = GetEnvironmentVariableW(L"MAGICMIDA_SCYLLA_DEBUG", value,
+                                               _countof(value));
   return length != 0 && length < _countof(value);
 }
 
@@ -128,14 +130,12 @@ bool ReadNtApiInformation(HOOK_DLL_DATA* hdd) {
   hdd->NtUserQueryWindowVA = loader.GetUserSyscallVa("NtUserQueryWindow");
   hdd->NtUserGetForegroundWindowVA =
       loader.GetUserSyscallVa("NtUserGetForegroundWindow");
-  hdd->NtUserBuildHwndListVA =
-      loader.GetUserSyscallVa("NtUserBuildHwndList");
+  hdd->NtUserBuildHwndListVA = loader.GetUserSyscallVa("NtUserBuildHwndList");
   hdd->NtUserFindWindowExVA = loader.GetUserSyscallVa("NtUserFindWindowEx");
   hdd->NtUserGetClassNameVA = loader.GetUserSyscallVa("NtUserGetClassName");
   hdd->NtUserInternalGetWindowTextVA =
       loader.GetUserSyscallVa("NtUserInternalGetWindowText");
-  hdd->NtUserGetThreadStateVA =
-      loader.GetUserSyscallVa("NtUserGetThreadState");
+  hdd->NtUserGetThreadStateVA = loader.GetUserSyscallVa("NtUserGetThreadState");
   return true;
 }
 
@@ -193,16 +193,14 @@ bool WriteHookDllData(Session& session) {
     return false;
   }
   return WriteProcessMemory(
-             session.process,
-             static_cast<uint8_t*>(session.remoteBase) + rva, &session.hookData,
-             sizeof(session.hookData), nullptr) != FALSE;
+             session.process, static_cast<uint8_t*>(session.remoteBase) + rva,
+             &session.hookData, sizeof(session.hookData), nullptr) != FALSE;
 }
 
-bool LoadEmbeddedHookLibrary(std::vector<uint8_t>* image,
-                             std::string* error) {
-  const HRSRC resource = FindResourceW(
-      nullptr, MAKEINTRESOURCEW(kScyllaHookResourceId),
-      MAKEINTRESOURCEW(kRtRcData));
+bool LoadEmbeddedHookLibrary(std::vector<uint8_t>* image, std::string* error) {
+  const HRSRC resource =
+      FindResourceW(nullptr, MAKEINTRESOURCEW(kScyllaHookResourceId),
+                    MAKEINTRESOURCEW(kRtRcData));
   if (resource == nullptr) {
     *error = "embedded ScyllaHide hook library not found";
     return false;
@@ -217,8 +215,7 @@ bool LoadEmbeddedHookLibrary(std::vector<uint8_t>* image,
   }
 
   const auto* dos = static_cast<const IMAGE_DOS_HEADER*>(data);
-  if (dos->e_magic != IMAGE_DOS_SIGNATURE ||
-      dos->e_lfanew < 0 ||
+  if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew < 0 ||
       static_cast<size_t>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS) > size) {
     *error = "embedded ScyllaHide hook library has an invalid PE header";
     return false;
@@ -342,7 +339,8 @@ bool Start(HANDLE process, DWORD processId, const Profile& profile,
     ApplyNtdllVersionPatch(process);
   }
 
-  session->remoteBase = MapModuleToProcess(process, session->image.data(), true);
+  session->remoteBase =
+      MapModuleToProcess(process, session->image.data(), true);
   if (session->remoteBase == nullptr) {
     *error = "mapping the ScyllaHide hook library failed";
     return false;
@@ -387,7 +385,8 @@ void OnDllLoad(const std::wstring& fileName) {
   } else {
     // win32u is mapped before user32 and the NtUser* stubs are not always
     // ready yet. The user32 event retries; only warn if that one fails.
-    Log(ltInfo, "ScyllaHide: user32 hooks will be applied when user32.dll loads");
+    Log(ltInfo,
+        "ScyllaHide: user32 hooks will be applied when user32.dll loads");
   }
 }
 
@@ -402,8 +401,8 @@ void Stop() {
 extern "C" int ScyllaHideMessageBoxA(HWND /*hWnd*/, LPCSTR lpText,
                                      LPCSTR lpCaption, UINT uType) {
   const UINT icon = uType & MB_ICONMASK;
-  const bool isError = icon == MB_ICONERROR || icon == MB_ICONHAND ||
-                       icon == MB_ICONSTOP;
+  const bool isError =
+      icon == MB_ICONERROR || icon == MB_ICONHAND || icon == MB_ICONSTOP;
   const bool isWarning = icon == MB_ICONWARNING || icon == MB_ICONEXCLAMATION;
   const magicmida::LogMsgType type =
       isError ? magicmida::ltFatal

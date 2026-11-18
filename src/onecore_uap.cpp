@@ -4,8 +4,9 @@
 
 #include <algorithm>
 #include <array>
-#include <iterator>
 #include <cstring>
+#include <iterator>
+#include <string>
 #include <string_view>
 
 namespace magicmida {
@@ -23,11 +24,11 @@ constexpr ApiSetEntry kApiSetApis[] = {
 }  // namespace
 
 std::string GetOneCoreUAPModuleByAPI(const std::string& api) {
-  const auto it = std::lower_bound(
-      std::begin(kApiSetApis), std::end(kApiSetApis), api,
-      [](const ApiSetEntry& entry, const std::string& value) {
-        return std::string_view(entry.api) < value;
-      });
+  const auto it =
+      std::lower_bound(std::begin(kApiSetApis), std::end(kApiSetApis), api,
+                       [](const ApiSetEntry& entry, const std::string& value) {
+                         return std::string_view(entry.api) < value;
+                       });
 
   if (it == std::end(kApiSetApis) || api != it->api) {
     return {};

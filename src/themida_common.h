@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Shared Themida-unpacking logic (ported from ThemidaCommon.pas).
-#pragma once
+#ifndef MAGICMIDA_THEMIDA_COMMON_H_
+#define MAGICMIDA_THEMIDA_COMMON_H_
 
 #include "common.h"
 #include "debugger_core.h"
@@ -58,3 +59,5 @@ class ThemidaCommon : public DebuggerCore {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_THEMIDA_COMMON_H_

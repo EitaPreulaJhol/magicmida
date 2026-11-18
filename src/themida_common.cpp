@@ -8,6 +8,9 @@
 #include <array>
 #include <cstring>
 #include <functional>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace magicmida {
 namespace {
@@ -152,7 +155,8 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
 
     while ((numInstr < 200) ||
            (ignoreMethodBoundary && (dis.VirtualAddr < textBase + codeSize))) {
-      if (dis.VirtualAddr < textBase || dis.VirtualAddr >= textBase + codeSize) {
+      if (dis.VirtualAddr < textBase ||
+          dis.VirtualAddr >= textBase + codeSize) {
         break;
       }
 
@@ -183,7 +187,8 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
           return 0;  // 32-bit: probably direct API call. Handled below.
         }
 
-        const uintptr_t result = findCallOrJmpPtr(dis.Instruction.AddrValue, false);
+        const uintptr_t result =
+            findCallOrJmpPtr(dis.Instruction.AddrValue, false);
         if (result != 0) {
           return result;
         }
@@ -250,7 +255,7 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
     }
 
     return 0;
-  };
+  };  // NOLINT(readability/braces)
 
   std::function<uintptr_t(uintptr_t, bool)> scanData =
       [&](uintptr_t toFind, bool scanCode) -> uintptr_t {
@@ -299,9 +304,10 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
 
   textBase = imageBase_ + peSections_[0].VirtualAddress;
   codeSize = baseOfData_ - peSections_[0].VirtualAddress;
-  dataSize = peSections_[static_cast<size_t>(dataSectionIndex)].Misc.VirtualSize -
-             (baseOfData_ -
-              peSections_[static_cast<size_t>(dataSectionIndex)].VirtualAddress);
+  dataSize =
+      peSections_[static_cast<size_t>(dataSectionIndex)].Misc.VirtualSize -
+      (baseOfData_ -
+       peSections_[static_cast<size_t>(dataSectionIndex)].VirtualAddress);
   LogF(ltInfo, "Text base: 0x%.8llX, code size: 0x%llX, data size: 0x%llX",
        static_cast<unsigned long long>(textBase),
        static_cast<unsigned long long>(codeSize),
@@ -319,9 +325,9 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
 
     uintptr_t iatRef = 0;
     if (*reinterpret_cast<const uint32_t*>(codeDump) == 0x6F4720FF) {
-      iatRef = findGoAPICall(textBase +
-                             FindGoBuildIdEnd(codeDump,
-                                              static_cast<uint32_t>(codeSize)));
+      iatRef = findGoAPICall(
+          textBase +
+          FindGoBuildIdEnd(codeDump, static_cast<uint32_t>(codeSize)));
     } else if (!isVMOEP_) {
       iatRef = findCallOrJmpPtr(oep, false);
     } else if (*reinterpret_cast<const uint32_t*>(
@@ -341,11 +347,11 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
         RPM(guardAddrs_[0], site, 6);
         uintptr_t target = 0;
         if (site[0] == 0xE8 || site[0] == 0xE9) {
-          target = *reinterpret_cast<const uint32_t*>(site + 1) +
-                   guardAddrs_[0] + 5;
+          target =
+              *reinterpret_cast<const uint32_t*>(site + 1) + guardAddrs_[0] + 5;
         } else if (site[1] == 0xE8 || site[1] == 0xE9) {
-          target = *reinterpret_cast<const uint32_t*>(site + 2) +
-                   guardAddrs_[0] + 6;
+          target =
+              *reinterpret_cast<const uint32_t*>(site + 2) + guardAddrs_[0] + 6;
         } else {
           throw std::runtime_error("First guard addr is not call/jmp");
         }
@@ -383,14 +389,15 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
           break;
         }
       } else if (dumper.IsAPIAddress(iatData[static_cast<size_t>(index)]) ||
-                 (themidaV3_ && tmSectR_.Contains(
-                                    iatData[static_cast<size_t>(index)]))) {
+                 (themidaV3_ &&
+                  tmSectR_.Contains(iatData[static_cast<size_t>(index)]))) {
         result = seeker;
         consecutive0 = 0;
       } else {
         LogF(ltInfo, "Ending IAT start search at %llX because pointer is %llX",
              static_cast<unsigned long long>(seeker),
-             static_cast<unsigned long long>(iatData[static_cast<size_t>(index)]));
+             static_cast<unsigned long long>(
+                 iatData[static_cast<size_t>(index)]));
         break;
       }
 
@@ -453,12 +460,10 @@ void ThemidaCommon::TraceImports(uintptr_t iat, Dumper& dumper) {
             Log(ltInfo, "Setting API to ExitProcess");
           } else {
             LogF(ltFatal, "Unable to determine IAT address for %08llX",
-                 static_cast<unsigned long long>(
-                     iat + i * sizeof(uintptr_t)));
+                 static_cast<unsigned long long>(iat + i * sizeof(uintptr_t)));
           }
         } else if (tracedAPI_ != 0) {
-          LogF(ltInfo, "-> %llX",
-               static_cast<unsigned long long>(tracedAPI_));
+          LogF(ltInfo, "-> %llX", static_cast<unsigned long long>(tracedAPI_));
           if (tracedAPI_ < 0x10000 ||
               (tracedAPI_ >= imageBase_ && tracedAPI_ < imageBoundary_)) {
             Log(ltInfo, "Discarding result & aborting IAT tracing");

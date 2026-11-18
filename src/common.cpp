@@ -4,7 +4,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace magicmida {
 namespace {
@@ -156,8 +161,8 @@ std::wstring Utf8ToWide(const std::string& value) {
   if (value.empty()) {
     return {};
   }
-  const int length = MultiByteToWideChar(CP_UTF8, 0, value.data(),
-                                         static_cast<int>(value.size()), nullptr, 0);
+  const int length = MultiByteToWideChar(
+      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
   if (length <= 0) {
     return {};
   }
@@ -172,8 +177,8 @@ std::string WideToUtf8(const std::wstring& value) {
     return {};
   }
   const int length = WideCharToMultiByte(CP_UTF8, 0, value.data(),
-                                         static_cast<int>(value.size()), nullptr, 0,
-                                         nullptr, nullptr);
+                                         static_cast<int>(value.size()),
+                                         nullptr, 0, nullptr, nullptr);
   if (length <= 0) {
     return {};
   }
@@ -252,8 +257,8 @@ std::wstring GetCurrentDir() {
 std::wstring GetExecutablePath() {
   std::wstring result(MAX_PATH, L'\0');
   for (;;) {
-    const DWORD written =
-        GetModuleFileNameW(nullptr, result.data(), static_cast<DWORD>(result.size()));
+    const DWORD written = GetModuleFileNameW(nullptr, result.data(),
+                                             static_cast<DWORD>(result.size()));
     if (written == 0) {
       return {};
     }
@@ -267,7 +272,8 @@ std::wstring GetExecutablePath() {
 
 std::wstring MakeUnpackedFileName(const std::wstring& executable) {
   return ExtractFilePath(executable) +
-         ChangeFileExt(ExtractFileName(executable), L"U" + ExtractFileExt(executable));
+         ChangeFileExt(ExtractFileName(executable),
+                       L"U" + ExtractFileExt(executable));
 }
 
 // --------------------------------------------------------------------------
@@ -297,8 +303,8 @@ ParsedPattern ParsePattern(const std::string& pattern) {
     const int high = HexDigit(hi);
     const int low = HexDigit(lo);
     if (high < 0 || low < 0) {
-      throw std::runtime_error(Format("Invalid pattern byte at index %zu: '%c%c'",
-                                      i * 2, hi, lo));
+      throw std::runtime_error(
+          Format("Invalid pattern byte at index %zu: '%c%c'", i * 2, hi, lo));
     }
     result.bytes[i] = static_cast<uint8_t>((high << 4) | low);
   }
@@ -307,7 +313,8 @@ ParsedPattern ParsePattern(const std::string& pattern) {
 
 }  // namespace
 
-uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf, size_t size) {
+uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf,
+                     size_t size) {
   if (buf == nullptr || size == 0) {
     return 0;
   }
@@ -334,7 +341,8 @@ uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf, size_t size
   return 0;
 }
 
-uint32_t FindStatic(const std::string& pattern, const uint8_t* buf, size_t size) {
+uint32_t FindStatic(const std::string& pattern, const uint8_t* buf,
+                    size_t size) {
   if (buf == nullptr || size == 0) {
     return 0;
   }
@@ -385,8 +393,9 @@ uint32_t GetWindowsMajorVersion() {
 }
 
 uint32_t GetPETimestamp(const std::wstring& filename) {
-  HANDLE file = CreateFileW(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE file =
+      CreateFileW(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) {
     return 0;
   }
@@ -407,7 +416,8 @@ uint32_t GetPETimestamp(const std::wstring& filename) {
     return 0;
   }
 
-  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(header + dos->e_lfanew);
+  const auto* nt =
+      reinterpret_cast<const IMAGE_NT_HEADERS*>(header + dos->e_lfanew);
   return nt->FileHeader.TimeDateStamp;
 }
 
@@ -430,9 +440,8 @@ bool EnableDebugPrivilege() {
   privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
   SetLastError(ERROR_SUCCESS);
-  const BOOL adjusted =
-      AdjustTokenPrivileges(token, FALSE, &privileges, sizeof(privileges),
-                            nullptr, nullptr);
+  const BOOL adjusted = AdjustTokenPrivileges(
+      token, FALSE, &privileges, sizeof(privileges), nullptr, nullptr);
   const DWORD error = GetLastError();
   CloseHandle(token);
   return adjusted != FALSE && error == ERROR_SUCCESS;

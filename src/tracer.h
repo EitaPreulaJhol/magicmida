@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Single-step tracer used while resolving protected IAT entries.
-#pragma once
+#ifndef MAGICMIDA_TRACER_H_
+#define MAGICMIDA_TRACER_H_
 
 #include "common.h"
 
@@ -35,3 +36,5 @@ class Tracer {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_TRACER_H_

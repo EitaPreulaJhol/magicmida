@@ -21,6 +21,7 @@
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -73,8 +74,8 @@ class RelocTable {
       const size_t entries = page.second.size();
       // Blocks must be 32-bit aligned: pad with IMAGE_REL_BASED_ABSOLUTE.
       const size_t padded = (entries + 1) & ~static_cast<size_t>(1);
-      const uint32_t blockSize = static_cast<uint32_t>(
-          kBlockHeaderSize + padded * sizeof(uint16_t));
+      const uint32_t blockSize =
+          static_cast<uint32_t>(kBlockHeaderSize + padded * sizeof(uint16_t));
       const size_t start = data.size();
       data.resize(start + blockSize, 0);
 
@@ -85,9 +86,9 @@ class RelocTable {
 
       size_t index = 0;
       for (uint16_t entry : page.second) {
-        std::memcpy(data.data() + start + kBlockHeaderSize +
-                        index * sizeof(uint16_t),
-                    &entry, sizeof(entry));
+        std::memcpy(
+            data.data() + start + kBlockHeaderSize + index * sizeof(uint16_t),
+            &entry, sizeof(entry));
         ++index;
       }
       // The remaining entries stay zero (IMAGE_REL_BASED_ABSOLUTE padding).
@@ -172,11 +173,9 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
       const int64_t begin =
           static_cast<int64_t>(header.PointerToRawData) + delta;
       const int64_t sectionEnd =
-          static_cast<int64_t>(header.PointerToRawData) +
-          header.SizeOfRawData;
-      const int64_t end =
-          std::min<int64_t>(begin + relocDirectory.Size,
-                            std::min<int64_t>(sectionEnd, fileSize));
+          static_cast<int64_t>(header.PointerToRawData) + header.SizeOfRawData;
+      const int64_t end = std::min<int64_t>(
+          begin + relocDirectory.Size, std::min<int64_t>(sectionEnd, fileSize));
       existingRelocBegin = begin;
       existingRelocEnd = end;
       int64_t position = begin;
@@ -280,8 +279,8 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
       if (!isImageAddress(value)) {
         continue;
       }
-      const uint32_t rva = header.VirtualAddress +
-                           static_cast<uint32_t>(offset - begin);
+      const uint32_t rva =
+          header.VirtualAddress + static_cast<uint32_t>(offset - begin);
       table.Add(rva, relocType);
     }
   }
@@ -295,11 +294,10 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
   }
 
   const std::vector<uint8_t> relocData = table.Build();
-  const uint32_t fileAlignment =
-      nt.OptionalHeader.FileAlignment != 0 ? nt.OptionalHeader.FileAlignment
-                                           : 0x200;
-  const uint32_t alignedDataSize =
-      AlignUp(relocData.size(), fileAlignment);
+  const uint32_t fileAlignment = nt.OptionalHeader.FileAlignment != 0
+                                     ? nt.OptionalHeader.FileAlignment
+                                     : 0x200;
+  const uint32_t alignedDataSize = AlignUp(relocData.size(), fileAlignment);
 
   // Reuse the existing .reloc section only when it is the last section and
   // the relocation directory covers exactly its beginning; otherwise append a
@@ -309,7 +307,8 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
     const auto& sections = pe.Sections();
     if (existingRelocSection < sections.size() &&
         existingRelocSection == sections.size() - 1) {
-      const IMAGE_SECTION_HEADER& header = sections[existingRelocSection].Header;
+      const IMAGE_SECTION_HEADER& header =
+          sections[existingRelocSection].Header;
       reuse = SectionName(header) == ".reloc" &&
               relocDirectory.VirtualAddress == header.VirtualAddress &&
               header.SizeOfRawData >= alignedDataSize;
@@ -355,13 +354,12 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
     relocSection->Header.PointerToRawData =
         AlignUp(static_cast<uint64_t>(fileSize), fileAlignment);
     relocSection->Header.SizeOfRawData = alignedDataSize;
-    relocSection->Header.Characteristics =
-        IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ |
-        IMAGE_SCN_MEM_DISCARDABLE;
+    relocSection->Header.Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA |
+                                           IMAGE_SCN_MEM_READ |
+                                           IMAGE_SCN_MEM_DISCARDABLE;
   }
 
-  nt.FileHeader.NumberOfSections =
-      static_cast<WORD>(pe.Sections().size());
+  nt.FileHeader.NumberOfSections = static_cast<WORD>(pe.Sections().size());
   nt.FileHeader.Characteristics &= ~IMAGE_FILE_RELOCS_STRIPPED;
 
   IMAGE_DATA_DIRECTORY& relocDirectoryOut =

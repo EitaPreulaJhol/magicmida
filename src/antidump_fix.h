@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // VM anti-dump mitigation (ported from AntiDumpFix.pas).
-#pragma once
+#ifndef MAGICMIDA_ANTIDUMP_FIX_H_
+#define MAGICMIDA_ANTIDUMP_FIX_H_
 
 #include "common.h"
 
@@ -25,3 +26,5 @@ class AntiDumpFixer {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_ANTIDUMP_FIX_H_

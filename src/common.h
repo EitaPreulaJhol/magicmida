@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Common helpers shared by all components.
-#pragma once
+#ifndef MAGICMIDA_COMMON_H_
+#define MAGICMIDA_COMMON_H_
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -91,7 +92,8 @@ std::wstring GetCurrentDir();
 std::wstring GetExecutablePath();
 bool EnableDebugPrivilege();
 
-// Builds "<dir><stem>U<ext>" like the original ChangeFileExt(FileName, 'U'+ext).
+// Builds "<dir><stem>U<ext>" like the original ChangeFileExt(FileName,
+// 'U'+ext).
 std::wstring MakeUnpackedFileName(const std::wstring& executable);
 
 // --------------------------------------------------------------------------
@@ -118,8 +120,10 @@ struct MemoryRegion {
 // character is '?' is treated as a wildcard (matching the original code).
 // Returns the offset from `buf`, or 0 when the pattern was not found.
 
-uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf, size_t size);
-uint32_t FindStatic(const std::string& pattern, const uint8_t* buf, size_t size);
+uint32_t FindDynamic(const std::string& pattern, const uint8_t* buf,
+                     size_t size);
+uint32_t FindStatic(const std::string& pattern, const uint8_t* buf,
+                    size_t size);
 
 // --------------------------------------------------------------------------
 // Misc Win32 helpers (ported from Utils.pas)
@@ -133,16 +137,6 @@ uint32_t GetPETimestamp(const std::wstring& filename);
 // NTSTATUS is not exposed by the lean public headers MinGW ships with.
 using NtStatus = LONG;
 
-extern "C" NtStatus __stdcall NtQueryInformationProcess(HANDLE processHandle,
-                                                        DWORD processInformationClass,
-                                                        PVOID processInformation,
-                                                        DWORD processInformationLength,
-                                                        PULONG returnLength);
-extern "C" NtStatus __stdcall NtQueryInformationThread(HANDLE threadHandle,
-                                                       DWORD threadInformationClass,
-                                                       PVOID threadInformation,
-                                                       DWORD threadInformationLength,
-                                                       PULONG returnLength);
 extern "C" LONG __stdcall RtlGetVersion(OSVERSIONINFOW* info);
 
 // Windows structs missing from the public SDK headers.
@@ -168,3 +162,5 @@ struct ThreadBasicInformation {
 constexpr NtStatus STATUS_SUCCESS_VALUE = 0;
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_COMMON_H_

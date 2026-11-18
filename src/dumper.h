@@ -1,6 +1,7 @@
 // Magicmida - C++ port
 // Import reconstruction and process dumping (ported from Dumper.pas).
-#pragma once
+#ifndef MAGICMIDA_DUMPER_H_
+#define MAGICMIDA_DUMPER_H_
 
 #include "common.h"
 #include "pe_info.h"
@@ -62,7 +63,8 @@ class Dumper {
   Dumper& operator=(const Dumper&) = delete;
 
   std::unique_ptr<PEHeader> Process();
-  void DumpToFile(const std::wstring& fileName, PEHeader& pe, bool isDll = false);
+  void DumpToFile(const std::wstring& fileName, PEHeader& pe,
+                  bool isDll = false);
 
   uint32_t DetermineIATSize(const uint8_t* iat);
   bool IsAPIAddress(uintptr_t address);
@@ -119,3 +121,5 @@ class DumperDotnet {
 };
 
 }  // namespace magicmida
+
+#endif  // MAGICMIDA_DUMPER_H_
