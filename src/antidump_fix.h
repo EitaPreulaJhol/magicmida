@@ -14,7 +14,7 @@ namespace magicmida {
 // of the program, it will very likely crash.
 class AntiDumpFixer {
  public:
-  AntiDumpFixer(HANDLE process, uintptr_t imageBase);
+  AntiDumpFixer(HANDLE process, uintptr_t image_base);
 
   void RedirectOEP(uintptr_t oep, uintptr_t iat);
 
@@ -22,7 +22,7 @@ class AntiDumpFixer {
   bool RPM(uintptr_t address, void* buf, size_t bufSize);
 
   HANDLE process_;
-  uintptr_t imageBase_;
+  uintptr_t image_base_;
 };
 
 }  // namespace magicmida

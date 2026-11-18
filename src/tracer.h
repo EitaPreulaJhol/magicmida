@@ -18,21 +18,21 @@ class Tracer {
 
   void Trace(uintptr_t address, uint32_t limit);
 
-  uintptr_t StartAddress() const { return startAddress_; }
+  uintptr_t StartAddress() const { return start_address_; }
   uint32_t Counter() const { return counter_; }
-  bool LimitReached() const { return limitReached_; }
+  bool LimitReached() const { return limit_reached_; }
 
  private:
   DWORD OnSingleStep(const DEBUG_EVENT& debugEvent);
 
-  DWORD processId_;
-  DWORD threadId_;
-  HANDLE threadHandle_;
+  DWORD process_id_;
+  DWORD thread_id_;
+  HANDLE thread_handle_;
   Predicate predicate_;
   uint32_t counter_ = 0;
   uint32_t limit_ = 0;
-  bool limitReached_ = false;
-  uintptr_t startAddress_ = 0;
+  bool limit_reached_ = false;
+  uintptr_t start_address_ = 0;
 };
 
 }  // namespace magicmida

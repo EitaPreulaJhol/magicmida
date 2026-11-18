@@ -13,30 +13,30 @@
 namespace magicmida {
 
 enum class HWBPType : uint8_t {
-  Execute = 0,
-  Write = 1,
-  Reserved = 2,
-  Access = 3,
+  kExecute = 0,
+  kWrite = 1,
+  kReserved = 2,
+  kAccess = 3,
 };
 
 struct Breakpoint {
-  uintptr_t Address = 0;
-  HWBPType Type = HWBPType::Execute;
-  bool Disabled = false;
+  uintptr_t address = 0;
+  HWBPType type = HWBPType::kExecute;
+  bool disabled = false;
 
-  void Change(uintptr_t address, HWBPType type) {
-    Address = address;
-    Type = type;
-    Disabled = false;
+  void Change(uintptr_t new_address, HWBPType new_type) {
+    address = new_address;
+    type = new_type;
+    disabled = false;
   }
 
-  bool IsSet() const { return !Disabled && Address > 0; }
+  bool IsSet() const { return !disabled && address > 0; }
 };
 
 enum class SoftBPAction {
-  KeepContinue,
-  ClearContinue,
-  KeepContinueNoStep,
+  kKeepContinue,
+  kClearContinue,
+  kKeepContinueNoStep,
 };
 
 class DebuggerCore {
@@ -57,8 +57,8 @@ class DebuggerCore {
 
   HANDLE ProcessHandle() const { return process_.hProcess; }
   const PROCESS_INFORMATION& ProcessInfo() const { return process_; }
-  DWORD CurrentThreadId() const { return currentThreadId_; }
-  uintptr_t ImageBase() const { return imageBase_; }
+  DWORD CurrentThreadId() const { return current_thread_id_; }
+  uintptr_t ImageBase() const { return image_base_; }
 
  protected:
   void MarkSuccess() { succeeded_ = true; }
@@ -68,7 +68,7 @@ class DebuggerCore {
   void FetchMemoryRegions();
   bool RPM(uintptr_t address, void* buf, size_t bufSize);
 
-  void SetBreakpoint(uintptr_t address, HWBPType type = HWBPType::Execute,
+  void SetBreakpoint(uintptr_t address, HWBPType type = HWBPType::kExecute,
                      bool refreshContexts = true);
   bool DisableBreakpoint(uintptr_t address);
   void EnableBreakpoints();
@@ -96,12 +96,12 @@ class DebuggerCore {
   // State shared with the Themida-specific implementations.
   std::wstring executable_;
   std::wstring parameters_;
-  bool isDll_ = false;
+  bool is_dll_ = false;
   PROCESS_INFORMATION process_{};
-  DWORD currentThreadId_ = 0;
-  uintptr_t imageBase_ = 0;
-  std::vector<MemoryRegion> memRegions_;
-  bool hideThreadEnd_ = false;
+  DWORD current_thread_id_ = 0;
+  uintptr_t image_base_ = 0;
+  std::vector<MemoryRegion> mem_regions_;
+  bool hide_thread_end_ = false;
 
  private:
   bool PEExecute();
@@ -127,12 +127,12 @@ class DebuggerCore {
   void CloseProcessHandles();
   void DeleteDllCopy();
 
-  DWORD attachPid_ = 0;
-  std::wstring dllExecutable_;
+  DWORD attach_pid_ = 0;
+  std::wstring dll_executable_;
   Breakpoint hw_[4];
   std::unordered_map<DWORD, HANDLE> threads_;
-  std::unordered_map<uintptr_t, uint8_t> softBPs_;
-  uintptr_t softBPReenable_ = 0;
+  std::unordered_map<uintptr_t, uint8_t> soft_bps_;
+  uintptr_t soft_bp_reenable_ = 0;
   bool succeeded_ = false;
 };
 

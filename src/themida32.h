@@ -16,7 +16,7 @@ class ThemidaDebugger : public ThemidaCommon {
  public:
   ThemidaDebugger(const std::wstring& executable,
                   const std::wstring& parameters, bool createData,
-                  bool useScyllaHide = true, bool fixRelocations = false);
+                  bool use_scylla_hide = true, bool fix_relocations = false);
   ~ThemidaDebugger() override = default;
 
  protected:
@@ -34,8 +34,8 @@ class ThemidaDebugger : public ThemidaCommon {
 
  private:
   struct EFLRecord {
-    uintptr_t Address = 0;
-    std::vector<uint8_t> Original;
+    uintptr_t address = 0;
+    std::vector<uint8_t> original;
   };
 
   bool TMFinderCheck(CONTEXT* context);
@@ -64,46 +64,46 @@ class ThemidaDebugger : public ThemidaCommon {
 
   bool wow64_ = false;
 
-  int baseAccessCount_ = 0;
+  int base_access_count_ = 0;
   bool compressed_ = false;
   uintptr_t base1_ = 0;
-  uintptr_t repEIP_ = 0;
-  uintptr_t ntQIP_ = 0;
+  uintptr_t rep_eip_ = 0;
+  uintptr_t nt_qip_ = 0;
 
-  void* closeHandleAPI_ = nullptr;
-  void* allocMemAPI_ = nullptr;
-  void* allocHeapAPI_ = nullptr;
-  void* kiFastSystemCall_ = nullptr;
-  void* ntSIT_ = nullptr;
-  void* ntQIP64_ = nullptr;
-  void* virtualProtectAPI_ = nullptr;
-  void* corExeMain_ = nullptr;
+  void* close_handle_api_ = nullptr;
+  void* alloc_mem_api_ = nullptr;
+  void* alloc_heap_api_ = nullptr;
+  void* ki_fast_system_call_ = nullptr;
+  void* nt_sit_ = nullptr;
+  void* nt_qip64_ = nullptr;
+  void* virtual_protect_api_ = nullptr;
+  void* cor_exe_main_ = nullptr;
 
-  void* cmpImgBase_ = nullptr;
-  void* magicJump_ = nullptr;
-  void* magicJumpV1_ = nullptr;
+  void* cmp_img_base_ = nullptr;
+  void* magic_jump_ = nullptr;
+  void* magic_jump_v1_ = nullptr;
 
-  bool baseAccessed_ = false;
-  bool newVer_ = false;
-  bool ancientVer_ = false;
-  int allocMemCounter_ = 0;
+  bool base_accessed_ = false;
+  bool new_ver_ = false;
+  bool ancient_ver_ = false;
+  int alloc_mem_counter_ = 0;
 
-  uintptr_t iJumper_ = 0;
+  uintptr_t iat_jumper_ = 0;
   uintptr_t mj1_ = 0;
   uintptr_t mj2_ = 0;
   uintptr_t mj3_ = 0;
   uintptr_t mj4_ = 0;
   std::array<EFLRecord, 3> efls_{};
-  bool themidaV2BySections_ = false;
+  bool themida_v2_by_sections_ = false;
 
-  uintptr_t guardStart_ = 0;
-  uintptr_t guardEnd_ = 0;
-  uint32_t guardProtection_ = 0;
-  bool guardStepping_ = false;
+  uintptr_t guard_start_ = 0;
+  uintptr_t guard_end_ = 0;
+  uint32_t guard_protection_ = 0;
+  bool guard_stepping_ = false;
 
-  uint32_t tlsAddressesOfCallbacks_ = 0;
-  uint32_t tlsCounter_ = 0;
-  uint32_t tlsTotal_ = 0;
+  uint32_t tls_addresses_of_callbacks_ = 0;
+  uint32_t tls_counter_ = 0;
+  uint32_t tls_total_ = 0;
 };
 
 }  // namespace magicmida

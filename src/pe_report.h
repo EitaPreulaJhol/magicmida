@@ -19,18 +19,18 @@ uint16_t ReadPEMachine(const std::wstring& target);
 
 struct PEFlags {
   uint16_t machine = 0;
-  bool isDll = false;
+  bool is_dll = false;
 };
 
 // Returns the machine type and the IMAGE_FILE_DLL flag in one read. Throws on
 // I/O or malformed PE.
 PEFlags ReadPEFlags(const std::wstring& target);
 
-// Sanity-checks an unpacked dump and logs the findings. `isDll` enables the
-// DLL-specific checks; `relocationsExpected` marks a missing relocation table
+// Sanity-checks an unpacked dump and logs the findings. `is_dll` enables the
+// DLL-specific checks; `relocations_expected` marks a missing relocation table
 // as fatal (the relocation fix was requested).
-void VerifyDump(const std::wstring& target, bool isDll,
-                bool relocationsExpected);
+void VerifyDump(const std::wstring& target, bool is_dll,
+                bool relocations_expected);
 
 // Returns true when the target PE has IMAGE_FILE_DLL set. Throws on I/O or
 // malformed PE.

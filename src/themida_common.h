@@ -22,29 +22,29 @@ class ThemidaCommon : public DebuggerCore {
   ~ThemidaCommon() override = default;
 
  protected:
-  bool createDataSections_ = false;
-  bool useScyllaHide_ = true;
-  bool fixRelocations_ = false;
-  uintptr_t baseOfData_ = 0;
-  uintptr_t imageBoundary_ = 0;
-  std::vector<IMAGE_SECTION_HEADER> peSections_;
-  uint8_t majorLinkerVersion_ = 0;
+  bool create_data_sections_ = false;
+  bool use_scylla_hide_ = true;
+  bool fix_relocations_ = false;
+  uintptr_t base_of_data_ = 0;
+  uintptr_t image_boundary_ = 0;
+  std::vector<IMAGE_SECTION_HEADER> pe_sections_;
+  uint8_t major_linker_version_ = 0;
 
-  std::unique_ptr<uint8_t[]> tmSectStorage_;
-  uint8_t* tmSect_ = nullptr;
-  MemoryRegion tmSectR_;
+  std::unique_ptr<uint8_t[]> tm_sect_storage_;
+  uint8_t* tm_sect_ = nullptr;
+  MemoryRegion tm_sect_r_;
 
-  bool themidaV3_ = false;
-  bool isVMOEP_ = false;
+  bool themida_v3_ = false;
+  bool is_vm_oep_ = false;
 
-  std::vector<uintptr_t> guardAddrs_;
+  std::vector<uintptr_t> guard_addrs_;
 
   // Used by TraceIsAtAPI.
-  uintptr_t tracedAPI_ = 0;
-  uintptr_t sleepAPI_ = 0;
-  uintptr_t lstrlenAPI_ = 0;
-  uintptr_t traceStartSP_ = 0;
-  bool traceInVM_ = false;
+  uintptr_t traced_api_ = 0;
+  uintptr_t sleep_api_ = 0;
+  uintptr_t lstrlen_api_ = 0;
+  uintptr_t trace_start_sp_ = 0;
+  bool trace_in_vm_ = false;
 
   void InitPEDetails(IMAGE_NT_HEADERS* nt);
   void CheckVirtualizedOEP(uintptr_t oep);

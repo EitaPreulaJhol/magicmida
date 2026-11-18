@@ -21,16 +21,16 @@ HANDLE g_cancelEvent = nullptr;
 void DefaultLog(LogMsgType type, const std::string& msg) {
   const char* prefix = "[Info] ";
   switch (type) {
-    case LogMsgType::Good:
+    case LogMsgType::kGood:
       prefix = "[Good] ";
       break;
-    case LogMsgType::Warning:
+    case LogMsgType::kWarning:
       prefix = "[Warning] ";
       break;
-    case LogMsgType::Fatal:
+    case LogMsgType::kFatal:
       prefix = "[Fatal] ";
       break;
-    case LogMsgType::Info:
+    case LogMsgType::kInfo:
     default:
       break;
   }

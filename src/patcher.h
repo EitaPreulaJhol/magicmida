@@ -47,7 +47,7 @@ class Patcher {
   uintptr_t FindDataStartMSVC6();
   bool FindDynTLSMSVC14(uintptr_t& dynTlsInit);
 
-  std::wstring fileName_;
+  std::wstring file_name_;
   MemoryStream stream_;
   std::unique_ptr<PEHeader> pe_;
 };

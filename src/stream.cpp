@@ -12,11 +12,11 @@ namespace {
 
 DWORD ToMoveMethod(Stream::Origin origin) {
   switch (origin) {
-    case Stream::Origin::Begin:
+    case Stream::Origin::kBegin:
       return FILE_BEGIN;
-    case Stream::Origin::Current:
+    case Stream::Origin::kCurrent:
       return FILE_CURRENT;
-    case Stream::Origin::End:
+    case Stream::Origin::kEnd:
       return FILE_END;
   }
   return FILE_BEGIN;
@@ -56,17 +56,17 @@ FileStream::FileStream(const std::wstring& path, Mode mode) {
   DWORD disposition = OPEN_EXISTING;
 
   switch (mode) {
-    case Mode::Read:
+    case Mode::kRead:
       access = GENERIC_READ;
       share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
       disposition = OPEN_EXISTING;
       break;
-    case Mode::ReadWrite:
+    case Mode::kReadWrite:
       access = GENERIC_READ | GENERIC_WRITE;
       share = FILE_SHARE_READ | FILE_SHARE_WRITE;
       disposition = OPEN_EXISTING;
       break;
-    case Mode::Create:
+    case Mode::kCreate:
       access = GENERIC_READ | GENERIC_WRITE;
       share = 0;
       disposition = CREATE_ALWAYS;
@@ -153,17 +153,17 @@ int64_t FileStream::Size() {
 // --------------------------------------------------------------------------
 
 void MemoryStream::LoadFromFile(const std::wstring& path) {
-  FileStream file(path, FileStream::Mode::Read);
-  const int64_t fileSize = file.Size();
-  buffer_.resize(static_cast<size_t>(fileSize));
+  FileStream file(path, FileStream::Mode::kRead);
+  const int64_t file_size = file.Size();
+  buffer_.resize(static_cast<size_t>(file_size));
   position_ = 0;
-  if (fileSize > 0) {
+  if (file_size > 0) {
     file.Read(buffer_.data(), buffer_.size());
   }
 }
 
 void MemoryStream::SaveToFile(const std::wstring& path) {
-  FileStream file(path, FileStream::Mode::Create);
+  FileStream file(path, FileStream::Mode::kCreate);
   if (!buffer_.empty()) {
     file.Write(buffer_.data(), buffer_.size());
   }
@@ -196,13 +196,13 @@ void MemoryStream::Write(const void* buffer, size_t size) {
 void MemoryStream::Seek(int64_t offset, Origin origin) {
   int64_t base = 0;
   switch (origin) {
-    case Origin::Begin:
+    case Origin::kBegin:
       base = 0;
       break;
-    case Origin::Current:
+    case Origin::kCurrent:
       base = position_;
       break;
-    case Origin::End:
+    case Origin::kEnd:
       base = static_cast<int64_t>(buffer_.size());
       break;
   }

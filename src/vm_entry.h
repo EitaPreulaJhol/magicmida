@@ -9,34 +9,34 @@
 namespace magicmida {
 
 enum class VmStubKind {
-  None,
-  DirectJump,    // E9 rel32
-  DirectCall,    // E8 rel32
-  ShortJump,     // EB rel8
-  PushJump,      // 68 imm32; E9 rel32
-  PushPushJump,  // 68 imm32; 68 imm32; E9 rel32 (Fish)
-  PushRet,       // 68 imm32; C3
-  MovEaxJmp,     // B8 imm32; FF E0
-  MovRaxJmp,     // 48 B8 imm64; FF E0
+  kNone,
+  kDirectJump,    // E9 rel32
+  kDirectCall,    // E8 rel32
+  kShortJump,     // EB rel8
+  kPushJump,      // 68 imm32; E9 rel32
+  kPushPushJump,  // 68 imm32; 68 imm32; E9 rel32 (Fish)
+  kPushRet,       // 68 imm32; C3
+  kMovEaxJmp,     // B8 imm32; FF E0
+  kMovRaxJmp,     // 48 B8 imm64; FF E0
 };
 
 struct VmStubInfo {
-  VmStubKind kind = VmStubKind::None;
+  VmStubKind kind = VmStubKind::kNone;
   // Number of bytes consumed by the stub.
-  uint32_t instructionSize = 0;
+  uint32_t instruction_size = 0;
   // Final jump/call target, as an RVA.
-  uint32_t targetRva = 0;
+  uint32_t target_rva = 0;
   // Pushed/moved context value, as an RVA (0 when the value is not in the
   // image or the stub has no context).
-  uint32_t contextRva = 0;
-  uint32_t contextRva2 = 0;
+  uint32_t context_rva = 0;
+  uint32_t context_rva2 = 0;
 };
 
-// Parses a VM entry stub from `code` at `stubRva`. `imageBase` converts
+// Parses a VM entry stub from `code` at `stubRva`. `image_base` converts
 // absolute immediates (push/mov) into RVAs. Requires at least 16 bytes for
-// the longest form; returns kind == None when the bytes do not match.
+// the longest form; returns kind == kNone when the bytes do not match.
 VmStubInfo ParseVmStub(const uint8_t* code, size_t size, uint32_t stubRva,
-                       uint64_t imageBase);
+                       uint64_t image_base);
 
 }  // namespace magicmida
 

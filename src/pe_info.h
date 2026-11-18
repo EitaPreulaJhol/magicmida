@@ -14,9 +14,9 @@
 namespace magicmida {
 
 struct PESection {
-  IMAGE_SECTION_HEADER Header{};
+  IMAGE_SECTION_HEADER header{};
   // Only populated for sections synthesized by the dumper (e.g. .import).
-  std::vector<uint8_t> Data;
+  std::vector<uint8_t> data;
 
   void Rename(std::string_view newName);
 };
@@ -72,16 +72,16 @@ class PEHeader {
   std::vector<PESection>& Sections() { return sections_; }
   const std::vector<PESection>& Sections() const { return sections_; }
 
-  uint32_t LFANew() const { return lfaNew_; }
-  uint32_t DumpSize() const { return dumpSize_; }
+  uint32_t LFANew() const { return lfa_new_; }
+  uint32_t DumpSize() const { return dump_size_; }
   uint32_t SizeOfImage() const { return ntHeaders.OptionalHeader.SizeOfImage; }
 
   IMAGE_NT_HEADERS ntHeaders{};
 
  private:
   std::vector<PESection> sections_;
-  uint32_t dumpSize_ = 0;
-  uint32_t lfaNew_ = 0;
+  uint32_t dump_size_ = 0;
+  uint32_t lfa_new_ = 0;
 };
 
 }  // namespace magicmida

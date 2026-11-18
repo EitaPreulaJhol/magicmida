@@ -10,10 +10,10 @@
 
 namespace magicmida {
 
-constexpr int INSTRUCT_LENGTH = 64;
+constexpr int kInstructLength = 64;
 
-constexpr int UNKNOWN_OPCODE = -1;
-constexpr int OUT_OF_BLOCK = -2;
+constexpr int kUnknownOpcode = -1;
+constexpr int kOutOfBlock = -2;
 
 // The following structures mirror the packed Delphi declarations in
 // BeaEngineDelphi.pas (which in turn mirror BeaEngine's public header).
@@ -112,7 +112,7 @@ struct DISASM {
   uintptr_t EIP;
   uint64_t VirtualAddr;
   uint32_t SecurityBlock;
-  char CompleteInstr[INSTRUCT_LENGTH];
+  char CompleteInstr[kInstructLength];
   uint32_t Archi;
   uint64_t Options;
   TINSTRTYPE Instruction;

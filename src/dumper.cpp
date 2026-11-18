@@ -82,8 +82,8 @@ bool IsPlausiblePEHeader(const std::vector<uint8_t>& data) {
     return false;
   }
 
-  const uint64_t sizeOfImage = nt->OptionalHeader.SizeOfImage;
-  if (sizeOfImage == 0 || sizeOfImage > 0x40000000ull ||
+  const uint64_t size_of_image = nt->OptionalHeader.SizeOfImage;
+  if (size_of_image == 0 || size_of_image > 0x40000000ull ||
       nt->OptionalHeader.ImageBase == 0) {
     return false;
   }
@@ -102,7 +102,7 @@ bool IsPlausiblePEHeader(const std::vector<uint8_t>& data) {
       anyContent = true;
     }
   }
-  if (!anyContent || maxEnd > sizeOfImage + 0x1000) {
+  if (!anyContent || maxEnd > size_of_image + 0x1000) {
     return false;
   }
   return true;
@@ -118,7 +118,7 @@ void LogHeaderDiff(const std::vector<uint8_t>& live,
   const auto* snapDos =
       reinterpret_cast<const IMAGE_DOS_HEADER*>(snapshot.data());
   if (liveDos->e_lfanew != snapDos->e_lfanew) {
-    Log(ltInfo, "PE header: e_lfanew changed.");
+    Log(kLogInfo, "PE header: e_lfanew changed.");
     return;
   }
   const size_t ntOffset = static_cast<size_t>(liveDos->e_lfanew);
@@ -132,42 +132,42 @@ void LogHeaderDiff(const std::vector<uint8_t>& live,
       reinterpret_cast<const IMAGE_NT_HEADERS*>(snapshot.data() + ntOffset);
   if (liveNt->Signature != IMAGE_NT_SIGNATURE ||
       snapNt->Signature != IMAGE_NT_SIGNATURE) {
-    Log(ltInfo, "PE header: signature changed.");
+    Log(kLogInfo, "PE header: signature changed.");
     return;
   }
 
   if (liveNt->FileHeader.NumberOfSections !=
       snapNt->FileHeader.NumberOfSections) {
-    LogF(ltInfo, "PE header: NumberOfSections %u -> %u.",
+    LogF(kLogInfo, "PE header: NumberOfSections %u -> %u.",
          snapNt->FileHeader.NumberOfSections,
          liveNt->FileHeader.NumberOfSections);
   }
   if (liveNt->FileHeader.Characteristics !=
       snapNt->FileHeader.Characteristics) {
-    LogF(ltInfo, "PE header: Characteristics %04X -> %04X.",
+    LogF(kLogInfo, "PE header: Characteristics %04X -> %04X.",
          snapNt->FileHeader.Characteristics,
          liveNt->FileHeader.Characteristics);
   }
   if (liveNt->OptionalHeader.AddressOfEntryPoint !=
       snapNt->OptionalHeader.AddressOfEntryPoint) {
-    LogF(ltInfo, "PE header: AddressOfEntryPoint %X -> %X.",
+    LogF(kLogInfo, "PE header: AddressOfEntryPoint %X -> %X.",
          snapNt->OptionalHeader.AddressOfEntryPoint,
          liveNt->OptionalHeader.AddressOfEntryPoint);
   }
   if (liveNt->OptionalHeader.SizeOfImage !=
       snapNt->OptionalHeader.SizeOfImage) {
-    LogF(ltInfo, "PE header: SizeOfImage %X -> %X.",
+    LogF(kLogInfo, "PE header: SizeOfImage %X -> %X.",
          snapNt->OptionalHeader.SizeOfImage,
          liveNt->OptionalHeader.SizeOfImage);
   }
   if (liveNt->OptionalHeader.ImageBase != snapNt->OptionalHeader.ImageBase) {
-    LogF(ltInfo, "PE header: ImageBase %llX -> %llX.",
+    LogF(kLogInfo, "PE header: ImageBase %llX -> %llX.",
          static_cast<unsigned long long>(snapNt->OptionalHeader.ImageBase),
          static_cast<unsigned long long>(liveNt->OptionalHeader.ImageBase));
   }
   if (liveNt->OptionalHeader.DllCharacteristics !=
       snapNt->OptionalHeader.DllCharacteristics) {
-    LogF(ltInfo, "PE header: DllCharacteristics %04X -> %04X.",
+    LogF(kLogInfo, "PE header: DllCharacteristics %04X -> %04X.",
          snapNt->OptionalHeader.DllCharacteristics,
          liveNt->OptionalHeader.DllCharacteristics);
   }
@@ -183,7 +183,7 @@ void LogHeaderDiff(const std::vector<uint8_t>& live,
        sectionOffset + sectionBytes > snapshot.size() ||
        std::memcmp(live.data() + sectionOffset, snapshot.data() + sectionOffset,
                    sectionBytes) != 0)) {
-    Log(ltInfo, "PE header: section table changed.");
+    Log(kLogInfo, "PE header: section table changed.");
   }
 }
 
@@ -194,80 +194,81 @@ void LogHeaderDiff(const std::vector<uint8_t>& live,
 // --------------------------------------------------------------------------
 
 Dumper::Dumper(const PROCESS_INFORMATION& process,
-               const std::wstring& originalFile, uintptr_t imageBase,
+               const std::wstring& originalFile, uintptr_t image_base,
                uintptr_t oep)
-    : process_(process), oep_(oep), imageBase_(imageBase) {
+    : process_(process), oep_(oep), image_base_(image_base) {
 #if !defined(_WIN64)
   if (GetWindowsMajorVersion() > 5) {
     // user32 has an internal function 'PatchExportTableForwarders' that
     // patches the AddressOfFunctions table.
-    usrPath_ = ExtractFilePath(GetExecutablePath()) + L"mmusr32.dll";
-    if (CopyFileW(L"C:\\Windows\\system32\\user32.dll", usrPath_.c_str(),
-                  FALSE)) {
-      const HMODULE module = LoadLibraryExW(usrPath_.c_str(), nullptr, 0x20);
+    usr_module_path_ = ExtractFilePath(GetExecutablePath()) + L"mmusr32.dll";
+    if (CopyFileW(L"C:\\Windows\\system32\\user32.dll",
+                  usr_module_path_.c_str(), FALSE)) {
+      const HMODULE module =
+          LoadLibraryExW(usr_module_path_.c_str(), nullptr, 0x20);
       if (module != nullptr) {
         // Data-file handles are tagged with +2 by the loader.
-        hUsr_ = reinterpret_cast<uintptr_t>(module) - 2;
+        usr_module_ = reinterpret_cast<uintptr_t>(module) - 2;
       }
     }
   }
 #endif
 
-  originalImports_ = GetOriginalImports(originalFile);
+  original_imports_ = GetOriginalImports(originalFile);
 
   // Capture the header at the OEP, before import tracing/anti-dump fixes can
   // modify it. Process() falls back to this snapshot when the live header
   // looks corrupted.
-  headerSnapshot_.resize(0x1000);
-  if (!RPM(imageBase_, headerSnapshot_.data(), headerSnapshot_.size())) {
-    MakeMemoryReadable(imageBase_, headerSnapshot_.size());
-    if (!RPM(imageBase_, headerSnapshot_.data(), headerSnapshot_.size())) {
-      headerSnapshot_.clear();
-      Log(ltWarning, "Could not capture the PE header before tracing.");
+  header_snapshot_.resize(0x1000);
+  if (!RPM(image_base_, header_snapshot_.data(), header_snapshot_.size())) {
+    MakeMemoryReadable(image_base_, header_snapshot_.size());
+    if (!RPM(image_base_, header_snapshot_.data(), header_snapshot_.size())) {
+      header_snapshot_.clear();
+      Log(kLogWarning, "Could not capture the PE header before tracing.");
     } else {
-      Log(ltInfo, "Captured the PE header at OEP.");
+      Log(kLogInfo, "Captured the PE header at OEP.");
     }
   }
 }
 
 Dumper::~Dumper() {
 #if !defined(_WIN64)
-  if (hUsr_ != 0) {
-    FreeLibrary(reinterpret_cast<HMODULE>(hUsr_ + 2));
-    DeleteFileW(usrPath_.c_str());
+  if (usr_module_ != 0) {
+    FreeLibrary(reinterpret_cast<HMODULE>(usr_module_ + 2));
+    DeleteFileW(usr_module_path_.c_str());
   }
 #endif
 }
 
 void Dumper::DumpToFile(const std::wstring& fileName, PEHeader& pe,
-                        bool isDll) {
-  FileStream file(fileName, FileStream::Mode::Create);
+                        bool is_dll) {
+  FileStream file(fileName, FileStream::Mode::kCreate);
 
   uint32_t size = pe.DumpSize();
   std::vector<uint8_t> buffer(size);
-  MakeMemoryReadable(imageBase_, size);
-  if (!RPM(imageBase_, buffer.data(), size)) {
+  MakeMemoryReadable(image_base_, size);
+  if (!RPM(image_base_, buffer.data(), size)) {
     throw std::runtime_error(
         Format("DumpToFile RPM failed (base: %llX, size: %X)",
-               static_cast<unsigned long long>(imageBase_), size));
+               static_cast<unsigned long long>(image_base_), size));
   }
 
-  uint32_t iatRawOffset = static_cast<uint32_t>(IAT - imageBase_);
+  uint32_t iatRawOffset = static_cast<uint32_t>(IAT - image_base_);
   // TrimHugeSections may adjust iatRawOffset depending on what is trimmed.
   const uint32_t delta = pe.TrimHugeSections(buffer.data(), iatRawOffset);
   size -= delta;
   file.Write(buffer.data(), size);
 
-  const size_t numberOfSections = pe.ntHeaders.FileHeader.NumberOfSections;
-  for (size_t i = numberOfSections; i < pe.Sections().size(); ++i) {
+  const size_t number_of_sections = pe.ntHeaders.FileHeader.NumberOfSections;
+  for (size_t i = number_of_sections; i < pe.Sections().size(); ++i) {
     const PESection& section = pe.Sections()[i];
-    const uint32_t rawSize = section.Header.SizeOfRawData;
-    const size_t available = std::min<size_t>(section.Data.size(), rawSize);
+    const uint32_t raw_size = section.header.SizeOfRawData;
+    const size_t available = std::min<size_t>(section.data.size(), raw_size);
     if (available > 0) {
-      file.Write(section.Data.data(), available);
+      file.Write(section.data.data(), available);
     }
-    if (available < rawSize) {
-      std::vector<uint8_t> zeros(rawSize - available);
+    if (available < raw_size) {
+      std::vector<uint8_t> zeros(raw_size - available);
       file.Write(zeros.data(), zeros.size());
     }
   }
@@ -275,38 +276,38 @@ void Dumper::DumpToFile(const std::wstring& fileName, PEHeader& pe,
   pe.ntHeaders.FileHeader.NumberOfSections =
       static_cast<WORD>(pe.Sections().size());
   pe.ntHeaders.OptionalHeader.AddressOfEntryPoint =
-      static_cast<uint32_t>(oep_ - imageBase_);
+      static_cast<uint32_t>(oep_ - image_base_);
 
-  if (isDll) {
+  if (is_dll) {
     pe.ntHeaders.FileHeader.Characteristics |= IMAGE_FILE_DLL;
     SwitchSxSManifestType(file, pe, 1, 2);  // Switch back
   }
 
   if ((pe.ntHeaders.OptionalHeader.DllCharacteristics & 0x40) != 0) {
-    Log(ltInfo, "Executable is ASLR-aware - disabling the flag in the dump");
+    Log(kLogInfo, "Executable is ASLR-aware - disabling the flag in the dump");
     pe.ntHeaders.OptionalHeader.DllCharacteristics &= ~0x40;
   }
 
-  // The dumped bytes were read from imageBase_. If the loader relocated the
+  // The dumped bytes were read from image_base_. If the loader relocated the
   // image, the in-memory header still reports the preferred base, and every
-  // absolute address in the dump is relative to imageBase_ instead. Keep the
+  // absolute address in the dump is relative to image_base_ instead. Keep the
   // header consistent with the contents.
   if (static_cast<uintptr_t>(pe.ntHeaders.OptionalHeader.ImageBase) !=
-      imageBase_) {
-    LogF(ltWarning,
+      image_base_) {
+    LogF(kLogWarning,
          "Header image base %llX does not match the load address %llX; "
          "updating the dump header.",
          static_cast<unsigned long long>(pe.ntHeaders.OptionalHeader.ImageBase),
-         static_cast<unsigned long long>(imageBase_));
+         static_cast<unsigned long long>(image_base_));
     pe.ntHeaders.OptionalHeader.ImageBase =
         static_cast<decltype(pe.ntHeaders.OptionalHeader.ImageBase)>(
-            imageBase_);
+            image_base_);
   }
 
   pe.SaveToStream(file);
 
-  file.Seek(iatRawOffset, Stream::Origin::Begin);
-  file.Write(iatImage_.data(), iatImageSize_);
+  file.Seek(iatRawOffset, Stream::Origin::kBegin);
+  file.Write(iat_image_.data(), iat_image_size_);
 }
 
 uint32_t Dumper::DetermineIATSize(const uint8_t* iat) {
@@ -314,7 +315,7 @@ uint32_t Dumper::DetermineIATSize(const uint8_t* iat) {
   uint32_t i = 0;
   uintptr_t value = 0;
 
-  while (i < MAX_IAT_SIZE &&
+  while (i < kMaxIatSize &&
          (lastValidOffset == 0 || i < lastValidOffset + 0x100)) {
     std::memcpy(&value, iat + i, sizeof(value));
     if (IsAPIAddress(value)) {
@@ -328,21 +329,33 @@ uint32_t Dumper::DetermineIATSize(const uint8_t* iat) {
 
 namespace {
 
+struct ImportThunk {
+  RemoteModule* module = nullptr;
+  std::string name;
+  std::vector<uintptr_t*> addresses;
+
+  explicit ImportThunk(RemoteModule* source_module) : module(source_module) {
+    if (source_module != nullptr) {
+      name = source_module->name;
+    }
+  }
+};
+
 struct ResolutionCandidate {
-  uintptr_t Address = 0;
-  RemoteModule* Module = nullptr;
+  uintptr_t address = 0;
+  RemoteModule* module = nullptr;
 };
 
 struct IATSlot {
-  std::vector<ResolutionCandidate> Candidates;
-  int ChosenCandidate = -1;
-  bool IsZero = false;
+  std::vector<ResolutionCandidate> candidates;
+  int chosen_candidate = -1;
+  bool is_zero = false;
 };
 
 struct ModuleVote {
-  std::string Name;
-  int Votes = 0;
-  int FirstSeen = 0;
+  std::string name;
+  int votes = 0;
+  int first_seen = 0;
 };
 
 }  // namespace
@@ -354,52 +367,52 @@ std::unique_ptr<PEHeader> Dumper::Process() {
 
   // Read header from memory.
   std::vector<uint8_t> sectionData(0x1000);
-  if (!RPM(imageBase_, sectionData.data(), sectionData.size())) {
+  if (!RPM(image_base_, sectionData.data(), sectionData.size())) {
     throw std::runtime_error("Dumper::Process: reading image header failed");
   }
 
-  if (!headerSnapshot_.empty() &&
-      headerSnapshot_.size() == sectionData.size() &&
-      std::memcmp(sectionData.data(), headerSnapshot_.data(),
+  if (!header_snapshot_.empty() &&
+      header_snapshot_.size() == sectionData.size() &&
+      std::memcmp(sectionData.data(), header_snapshot_.data(),
                   sectionData.size()) != 0) {
-    Log(ltWarning, "The PE header changed between OEP and dump.");
-    LogHeaderDiff(sectionData, headerSnapshot_);
+    Log(kLogWarning, "The PE header changed between OEP and dump.");
+    LogHeaderDiff(sectionData, header_snapshot_);
     const bool livePlausible = IsPlausiblePEHeader(sectionData);
-    const bool snapshotPlausible = IsPlausiblePEHeader(headerSnapshot_);
+    const bool snapshotPlausible = IsPlausiblePEHeader(header_snapshot_);
     if (!livePlausible && snapshotPlausible) {
-      Log(ltWarning,
+      Log(kLogWarning,
           "The live PE header looks corrupted; using the pre-trace snapshot.");
-      sectionData = headerSnapshot_;
+      sectionData = header_snapshot_;
     } else if (livePlausible) {
-      Log(ltInfo, "The live PE header still looks valid; keeping it.");
+      Log(kLogInfo, "The live PE header still looks valid; keeping it.");
     } else {
-      Log(ltWarning, "Both PE headers look invalid; keeping the live one.");
+      Log(kLogWarning, "Both PE headers look invalid; keeping the live one.");
     }
   }
 
   auto pe = std::make_unique<PEHeader>(sectionData.data(), sectionData.size());
   pe->Sanitize();
 
-  std::vector<uint8_t> iat(MAX_IAT_SIZE);
+  std::vector<uint8_t> iat(kMaxIatSize);
   if (!RPM(IAT, iat.data(), iat.size())) {
     throw std::runtime_error("Dumper::Process: reading IAT failed");
   }
 
   const uint32_t iatSize = DetermineIATSize(iat.data());
-  LogF(ltInfo, "Determined IAT size: %X", iatSize);
+  LogF(kLogInfo, "Determined IAT size: %X", iatSize);
 
   auto& iatDirectory =
       pe->ntHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT];
-  iatDirectory.VirtualAddress = static_cast<uint32_t>(IAT - imageBase_);
+  iatDirectory.VirtualAddress = static_cast<uint32_t>(IAT - image_base_);
   iatDirectory.Size = iatSize + static_cast<uint32_t>(sizeof(void*));
 
-  if (!snapshotTaken_) {
+  if (!snapshot_taken_) {
     TakeModuleSnapshot();
   }
 
   bool allowApiSets = false;
-  for (const OriginalImport& import : originalImports_) {
-    if (import.DllName.rfind("api-ms-win", 0) == 0) {
+  for (const OriginalImport& import : original_imports_) {
+    if (import.dll_name.rfind("api-ms-win", 0) == 0) {
       allowApiSets = true;
       break;
     }
@@ -425,9 +438,9 @@ std::unique_ptr<PEHeader> Dumper::Process() {
   // =======================================================================
   for (int i = 0; i < slotCount; ++i) {
     IATSlot& slot = slots[static_cast<size_t>(i)];
-    slot.IsZero = readSlot(i) == 0;
+    slot.is_zero = readSlot(i) == 0;
 
-    if (slot.IsZero) {
+    if (slot.is_zero) {
       continue;
     }
 
@@ -435,14 +448,14 @@ std::unique_ptr<PEHeader> Dumper::Process() {
 
     // --- Variant A: no forwarding ---
     ResolutionCandidate candidate;
-    candidate.Address = slotValue;
-    candidate.Module = nullptr;
-    for (const auto& rmPtr : allModules_) {
+    candidate.address = slotValue;
+    candidate.module = nullptr;
+    for (const auto& rmPtr : all_modules_) {
       RemoteModule& rm = *rmPtr;
-      if (candidate.Address > rm.Base && candidate.Address < rm.EndOff) {
-        if (rm.ExportTbl.find(candidate.Address) != rm.ExportTbl.end()) {
-          candidate.Module = &rm;
-          slot.Candidates.push_back(candidate);
+      if (candidate.address > rm.base && candidate.address < rm.end_off) {
+        if (rm.export_tbl.find(candidate.address) != rm.export_tbl.end()) {
+          candidate.module = &rm;
+          slot.candidates.push_back(candidate);
         }
         break;  // only one module owns this address
       }
@@ -452,14 +465,14 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     const auto forwardIt = forwards_.find(slotValue);
     if (forwardIt != forwards_.end()) {
       for (const ForwardOrigin& origin : forwardIt->second) {
-        candidate.Address = origin.SourceAddress;
-        candidate.Module = origin.SourceModule;
-        slot.Candidates.push_back(candidate);
+        candidate.address = origin.source_address;
+        candidate.module = origin.source_module;
+        slot.candidates.push_back(candidate);
       }
     }
 
-    if (slot.Candidates.empty()) {
-      LogF(ltInfo, "IAT slot %08llX -> %08llX unresolvable",
+    if (slot.candidates.empty()) {
+      LogF(kLogInfo, "IAT slot %08llX -> %08llX unresolvable",
            static_cast<unsigned long long>(IAT + static_cast<uintptr_t>(i) *
                                                      sizeof(uintptr_t)),
            static_cast<unsigned long long>(slotValue));
@@ -475,7 +488,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
   int i = 0;
   while (i < slotCount) {
     // Skip zero separators (they just end the current thunk naturally).
-    if (slots[static_cast<size_t>(i)].IsZero) {
+    if (slots[static_cast<size_t>(i)].is_zero) {
       ++i;
       continue;
     }
@@ -484,7 +497,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     const int groupStart = i;
     int groupEnd = i;
     while (groupEnd + 1 < slotCount &&
-           !slots[static_cast<size_t>(groupEnd + 1)].IsZero) {
+           !slots[static_cast<size_t>(groupEnd + 1)].is_zero) {
       ++groupEnd;
     }
 
@@ -493,16 +506,16 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     std::vector<ModuleVote> votes;
     for (int j = groupStart; j <= groupEnd; ++j) {
       for (const ResolutionCandidate& candidate :
-           slots[static_cast<size_t>(j)].Candidates) {
-        const std::string& moduleName = candidate.Module->Name;
+           slots[static_cast<size_t>(j)].candidates) {
+        const std::string& moduleName = candidate.module->name;
         auto it = std::find_if(
             votes.begin(), votes.end(),
-            [&](const ModuleVote& vote) { return vote.Name == moduleName; });
+            [&](const ModuleVote& vote) { return vote.name == moduleName; });
         if (it == votes.end()) {
           votes.push_back(
               ModuleVote{moduleName, 1, static_cast<int>(votes.size())});
         } else {
-          ++it->Votes;
+          ++it->votes;
         }
       }
     }
@@ -514,11 +527,11 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     RemoteModule* winnerModule = nullptr;
 
     for (const ModuleVote& vote : votes) {
-      const int preference = PreferenceScore(vote.Name);
-      if (vote.Votes > winnerVotes ||
-          (vote.Votes == winnerVotes && preference > winnerPreference)) {
-        winnerVotes = vote.Votes;
-        winnerName = vote.Name;
+      const int preference = PreferenceScore(vote.name);
+      if (vote.votes > winnerVotes ||
+          (vote.votes == winnerVotes && preference > winnerPreference)) {
+        winnerVotes = vote.votes;
+        winnerName = vote.name;
         winnerPreference = preference;
       }
     }
@@ -526,11 +539,11 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     // Pin each slot to the winning module's candidate.
     for (int j = groupStart; j <= groupEnd; ++j) {
       IATSlot& slot = slots[static_cast<size_t>(j)];
-      for (size_t k = 0; k < slot.Candidates.size(); ++k) {
-        if (slot.Candidates[k].Module->Name == winnerName) {
-          slot.ChosenCandidate = static_cast<int>(k);
+      for (size_t k = 0; k < slot.candidates.size(); ++k) {
+        if (slot.candidates[k].module->name == winnerName) {
+          slot.chosen_candidate = static_cast<int>(k);
           if (winnerModule == nullptr) {
-            winnerModule = slot.Candidates[k].Module;
+            winnerModule = slot.candidates[k].module;
           }
           break;
         }
@@ -541,18 +554,18 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     if (allowApiSets) {
       for (int j = groupStart; j <= groupEnd; ++j) {
         const IATSlot& slot = slots[static_cast<size_t>(j)];
-        if (slot.ChosenCandidate < 0 && slot.Candidates.empty()) {
+        if (slot.chosen_candidate < 0 && slot.candidates.empty()) {
           continue;
         }
 
         std::string funcName;
-        if (slot.ChosenCandidate < 0) {
-          funcName = slot.Candidates[0].Module->ExportTbl.at(
-              slot.Candidates[0].Address);
+        if (slot.chosen_candidate < 0) {
+          funcName = slot.candidates[0].module->export_tbl.at(
+              slot.candidates[0].address);
         } else if (winnerModule != nullptr) {
-          funcName = winnerModule->ExportTbl.at(
-              slot.Candidates[static_cast<size_t>(slot.ChosenCandidate)]
-                  .Address);
+          funcName = winnerModule->export_tbl.at(
+              slot.candidates[static_cast<size_t>(slot.chosen_candidate)]
+                  .address);
         }
 
         if (funcName.rfind("RtlQueryPerformance", 0) == 0) {
@@ -574,18 +587,18 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     if (!apiSetName.empty() && winnerModule != nullptr) {
       for (int j = groupStart; j <= groupEnd; ++j) {
         IATSlot& slot = slots[static_cast<size_t>(j)];
-        if (slot.ChosenCandidate >= 0 || slot.Candidates.empty()) {
+        if (slot.chosen_candidate >= 0 || slot.candidates.empty()) {
           continue;
         }
 
-        const std::string funcName =
-            slot.Candidates[0].Module->ExportTbl.at(slot.Candidates[0].Address);
+        const std::string funcName = slot.candidates[0].module->export_tbl.at(
+            slot.candidates[0].address);
         // Find the address of this function in winnerModule's export table.
-        for (const auto& exportEntry : winnerModule->ExportTbl) {
+        for (const auto& exportEntry : winnerModule->export_tbl) {
           if (exportEntry.second == funcName) {
-            slot.Candidates[0].Address = exportEntry.first;
-            slot.ChosenCandidate = 0;
-            LogF(ltInfo, "IAT slot %08llX: remapped apiset member %s",
+            slot.candidates[0].address = exportEntry.first;
+            slot.chosen_candidate = 0;
+            LogF(kLogInfo, "IAT slot %08llX: remapped apiset member %s",
                  static_cast<unsigned long long>(
                      IAT + static_cast<uintptr_t>(j) * sizeof(uintptr_t)),
                  funcName.c_str());
@@ -600,8 +613,8 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     ImportThunk* thunk = nullptr;
     for (int j = groupStart; j <= groupEnd; ++j) {
       IATSlot& slot = slots[static_cast<size_t>(j)];
-      if (slot.ChosenCandidate < 0) {
-        LogF(ltFatal,
+      if (slot.chosen_candidate < 0) {
+        LogF(kLogFatal,
              "IAT slot %08llX  has no candidate for winning module %s (bogus "
              "entry)",
              static_cast<unsigned long long>(IAT + static_cast<uintptr_t>(j) *
@@ -613,25 +626,25 @@ std::unique_ptr<PEHeader> Dumper::Process() {
       if (thunk == nullptr) {
         thunks.push_back(std::make_unique<ImportThunk>(winnerModule));
         thunk = thunks.back().get();
-        thunk->Name = winnerName;
+        thunk->name = winnerName;
       }
 
       // Write the resolved pointer back into the IAT image.
       const ResolutionCandidate& candidate =
-          slot.Candidates[static_cast<size_t>(slot.ChosenCandidate)];
-      writeSlot(j, candidate.Address);
-      thunk->Addresses.push_back(reinterpret_cast<uintptr_t*>(
+          slot.candidates[static_cast<size_t>(slot.chosen_candidate)];
+      writeSlot(j, candidate.address);
+      thunk->addresses.push_back(reinterpret_cast<uintptr_t*>(
           iat.data() + static_cast<size_t>(j) * sizeof(uintptr_t)));
     }
 
     if (!apiSetName.empty() && thunk != nullptr && winnerModule != nullptr) {
-      const uintptr_t firstAddress = *thunk->Addresses.front();
-      const auto firstImport = winnerModule->ExportTbl.find(firstAddress);
-      if (firstImport != winnerModule->ExportTbl.end() &&
-          !HasOriginalImport(thunk->Name, firstImport->second)) {
-        LogF(ltInfo, "OneCoreUAP: Using %s instead of %s", apiSetName.c_str(),
+      const uintptr_t firstAddress = *thunk->addresses.front();
+      const auto firstImport = winnerModule->export_tbl.find(firstAddress);
+      if (firstImport != winnerModule->export_tbl.end() &&
+          !HasOriginalImport(thunk->name, firstImport->second)) {
+        LogF(kLogInfo, "OneCoreUAP: Using %s instead of %s", apiSetName.c_str(),
              winnerName.c_str());
-        thunk->Name = apiSetName;
+        thunk->name = apiSetName;
       }
     }
 
@@ -639,17 +652,17 @@ std::unique_ptr<PEHeader> Dumper::Process() {
   }
 
   PESection* importSection = pe->CreateSection(".import", 0x1000);
-  std::vector<uint8_t> importData(importSection->Header.SizeOfRawData, 0);
+  std::vector<uint8_t> importData(importSection->header.SizeOfRawData, 0);
 
   const size_t descriptorCount = thunks.size() + 1;  // Last descriptor is empty
   size_t stringsOffset = descriptorCount * sizeof(IMAGE_IMPORT_DESCRIPTOR);
 
   auto ensureImportCapacity = [&](size_t required) {
     while (required > importData.size()) {
-      importSection->Header.SizeOfRawData += 0x1000;
-      importSection->Header.Misc.VirtualSize += 0x1000;
+      importSection->header.SizeOfRawData += 0x1000;
+      importSection->header.Misc.VirtualSize += 0x1000;
       pe->ntHeaders.OptionalHeader.SizeOfImage += 0x1000;
-      importData.resize(importSection->Header.SizeOfRawData, 0);
+      importData.resize(importSection->header.SizeOfRawData, 0);
     }
   };
 
@@ -659,43 +672,43 @@ std::unique_ptr<PEHeader> Dumper::Process() {
         reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(importData.data());
 
     descriptors[thunkIndex].FirstThunk = static_cast<uint32_t>(
-        IAT - imageBase_ +
-        reinterpret_cast<uintptr_t>(thunk.Addresses.front()) -
+        IAT - image_base_ +
+        reinterpret_cast<uintptr_t>(thunk.addresses.front()) -
         reinterpret_cast<uintptr_t>(iat.data()));
     descriptors[thunkIndex].Name =
-        pe->ConvertOffsetToRVAVector(importSection->Header.PointerToRawData +
+        pe->ConvertOffsetToRVAVector(importSection->header.PointerToRawData +
                                      static_cast<uint32_t>(stringsOffset));
 
-    const std::string& moduleName = thunk.Name;
+    const std::string& moduleName = thunk.name;
     ensureImportCapacity(stringsOffset + moduleName.size() + 1);
     std::memcpy(importData.data() + stringsOffset, moduleName.c_str(),
                 moduleName.size());
     stringsOffset += moduleName.size() + 1;
 
-    RemoteModule* remoteModule = thunk.Module;
-    LogF(ltInfo, "Thunk %s - first import: %s", thunk.Name.c_str(),
-         remoteModule->ExportTbl.at(*thunk.Addresses.front()).c_str());
+    RemoteModule* remoteModule = thunk.module;
+    LogF(kLogInfo, "Thunk %s - first import: %s", thunk.name.c_str(),
+         remoteModule->export_tbl.at(*thunk.addresses.front()).c_str());
 
-    for (size_t j = 0; j < thunk.Addresses.size(); ++j) {
-      std::string funcName = remoteModule->ExportTbl.at(*thunk.Addresses[j]);
+    for (size_t j = 0; j < thunk.addresses.size(); ++j) {
+      std::string funcName = remoteModule->export_tbl.at(*thunk.addresses[j]);
       if (!funcName.empty() && funcName[0] == '#') {
         const uint32_t ordinalIndex = static_cast<uint32_t>(
             std::strtoul(funcName.c_str() + 1, nullptr, 10));
-        *thunk.Addresses[j] =
+        *thunk.addresses[j] =
             static_cast<uintptr_t>(IMAGE_ORDINAL_FLAG) | ordinalIndex;
         continue;
       }
 
       if (funcName.rfind("RtlQueryPerformance", 0) == 0 &&
-          thunk.Name.rfind("api-ms-win", 0) == 0) {
+          thunk.name.rfind("api-ms-win", 0) == 0) {
         funcName.erase(0, 3);
       }
 
       // Hint (2 bytes, already zero) followed by the name.
       const size_t hintOffset = stringsOffset;
       stringsOffset += 2;
-      *thunk.Addresses[j] = static_cast<uintptr_t>(
-          pe->ConvertOffsetToRVAVector(importSection->Header.PointerToRawData +
+      *thunk.addresses[j] = static_cast<uintptr_t>(
+          pe->ConvertOffsetToRVAVector(importSection->header.PointerToRawData +
                                        static_cast<uint32_t>(hintOffset)));
 
       ensureImportCapacity(stringsOffset + funcName.size() + 1);
@@ -704,30 +717,30 @@ std::unique_ptr<PEHeader> Dumper::Process() {
       stringsOffset += funcName.size() + 1;
 
       if (stringsOffset > importData.size() - 0x100) {
-        importSection->Header.SizeOfRawData += 0x1000;
-        importSection->Header.Misc.VirtualSize += 0x1000;
+        importSection->header.SizeOfRawData += 0x1000;
+        importSection->header.Misc.VirtualSize += 0x1000;
         pe->ntHeaders.OptionalHeader.SizeOfImage += 0x1000;
-        importData.resize(importSection->Header.SizeOfRawData, 0);
+        importData.resize(importSection->header.SizeOfRawData, 0);
       }
     }
   }
 
-  importSection->Data = std::move(importData);
+  importSection->data = std::move(importData);
 
   auto& importDirectory =
       pe->ntHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-  importDirectory.VirtualAddress = importSection->Header.VirtualAddress;
+  importDirectory.VirtualAddress = importSection->header.VirtualAddress;
   importDirectory.Size =
       static_cast<uint32_t>(thunks.size() * sizeof(IMAGE_IMPORT_DESCRIPTOR));
 
-  iatImage_ = std::move(iat);
-  iatImageSize_ = iatSize;
+  iat_image_ = std::move(iat);
+  iat_image_size_ = iatSize;
   return pe;
 }
 
 void Dumper::GatherModuleExportsFromRemoteProcess(RemoteModule& module) {
   std::vector<uint8_t> head(0x1000);
-  if (!RPM(module.Base, head.data(), head.size())) {
+  if (!RPM(module.base, head.data(), head.size())) {
     return;
   }
 
@@ -743,7 +756,7 @@ void Dumper::GatherModuleExportsFromRemoteProcess(RemoteModule& module) {
   }
 
   std::vector<uint8_t> exportData(exportDirectory.Size);
-  if (!RPM(module.Base + exportDirectory.VirtualAddress, exportData.data(),
+  if (!RPM(module.base + exportDirectory.VirtualAddress, exportData.data(),
            exportData.size())) {
     return;
   }
@@ -770,14 +783,14 @@ void Dumper::GatherModuleExportsFromRemoteProcess(RemoteModule& module) {
     const char* functionName =
         reinterpret_cast<const char*>(RemoteExportPointer(
             exportData, exportDirectory.VirtualAddress, names[index]));
-    module.ExportTbl[module.Base + functions[functionIndex]] = functionName;
+    module.export_tbl[module.base + functions[functionIndex]] = functionName;
   }
 
   for (uint32_t index = 0; index < directory->NumberOfFunctions; ++index) {
     // Add ordinals.
     if (index < named.size() && !named[index]) {
       const uint32_t functionIndex = directory->Base + index;
-      module.ExportTbl[module.Base + functions[index]] =
+      module.export_tbl[module.base + functions[index]] =
           "#" + std::to_string(functionIndex);
     }
 
@@ -788,7 +801,7 @@ void Dumper::GatherModuleExportsFromRemoteProcess(RemoteModule& module) {
       const char* forward = reinterpret_cast<const char*>(RemoteExportPointer(
           exportData, exportDirectory.VirtualAddress, functions[index]));
       if (std::string(forward).find(".#") == std::string::npos) {
-        module.Forwards.push_back({forward, module.Base + functions[index]});
+        module.forwards.push_back({forward, module.base + functions[index]});
       }
     }
   }
@@ -798,7 +811,7 @@ void Dumper::GatherModuleExportsFromRemoteProcess(RemoteModule& module) {
 void Dumper::CollectSpecialUser32Forwards(RemoteModule& user32) {
   // Scan the specially loaded user32 copy, because forwards are patched out
   // in normally loaded user32 images.
-  const auto* modScan = reinterpret_cast<const uint8_t*>(hUsr_);
+  const auto* modScan = reinterpret_cast<const uint8_t*>(usr_module_);
   const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(modScan);
   const auto* nt =
       reinterpret_cast<const IMAGE_NT_HEADERS*>(modScan + dos->e_lfanew);
@@ -819,20 +832,20 @@ void Dumper::CollectSpecialUser32Forwards(RemoteModule& user32) {
                              exportDirectory.VirtualAddress +
                              exportDirectory.Size &&
         std::string(forward).find(".#") == std::string::npos) {
-      user32.Forwards.push_back({forward, 0});
+      user32.forwards.push_back({forward, 0});
     }
   }
 }
 #endif
 
 void Dumper::ResolveForwards(RemoteModule& module) {
-  for (const Forward& forward : module.Forwards) {
-    const size_t dotPos = forward.Key.find('.');
+  for (const Forward& forward : module.forwards) {
+    const size_t dotPos = forward.key.find('.');
     if (dotPos == std::string::npos) {
       continue;
     }
 
-    const std::string forwardModuleName = forward.Key.substr(0, dotPos);
+    const std::string forwardModuleName = forward.key.substr(0, dotPos);
     RemoteModule* forwardModule = nullptr;
 
     // api-ms-win, ext-ms-win
@@ -850,9 +863,9 @@ void Dumper::ResolveForwards(RemoteModule& module) {
       continue;
     }
 
-    const std::string forwardApiName = forward.Key.substr(dotPos + 1, 50);
+    const std::string forwardApiName = forward.key.substr(dotPos + 1, 50);
     uintptr_t procedureAddress = 0;
-    for (const auto& exportEntry : forwardModule->ExportTbl) {
+    for (const auto& exportEntry : forwardModule->export_tbl) {
       if (exportEntry.second == forwardApiName) {
         procedureAddress = exportEntry.first;
         break;
@@ -861,11 +874,11 @@ void Dumper::ResolveForwards(RemoteModule& module) {
 
     if (procedureAddress != 0) {
       auto& origins = forwards_[procedureAddress];
-      uintptr_t forwardValue = forward.Value;
+      uintptr_t forwardValue = forward.value;
 #if !defined(_WIN64)
-      if (module.Name == "user32.dll") {
+      if (module.name == "user32.dll") {
         forwardValue =
-            procedureAddress;  // user32 ExportTbl has resolved values
+            procedureAddress;  // user32 export_tbl has resolved values
       }
 #endif
       origins.push_back({&module, forwardValue});
@@ -874,8 +887,8 @@ void Dumper::ResolveForwards(RemoteModule& module) {
 }
 
 RemoteModule* Dumper::GetRemoteModule(HMODULE base) {
-  for (const auto& module : allModules_) {
-    if (module->Base == reinterpret_cast<uintptr_t>(base)) {
+  for (const auto& module : all_modules_) {
+    if (module->base == reinterpret_cast<uintptr_t>(base)) {
       return module.get();
     }
   }
@@ -884,8 +897,8 @@ RemoteModule* Dumper::GetRemoteModule(HMODULE base) {
 
 RemoteModule* Dumper::GetRemoteModule(const std::string& name) {
   const std::string lowered = AsciiLowerCase(name);
-  for (const auto& module : allModules_) {
-    if (module->Name == lowered) {
+  for (const auto& module : all_modules_) {
+    if (module->name == lowered) {
       return module.get();
     }
   }
@@ -893,20 +906,20 @@ RemoteModule* Dumper::GetRemoteModule(const std::string& name) {
 }
 
 bool Dumper::IsAPIAddress(uintptr_t address) {
-  if (!snapshotTaken_) {
+  if (!snapshot_taken_) {
     TakeModuleSnapshot();
   }
 
-  for (const auto& module : allModules_) {
-    if (address >= module->Base && address < module->EndOff) {
-      return module->ExportTbl.find(address) != module->ExportTbl.end();
+  for (const auto& module : all_modules_) {
+    if (address >= module->base && address < module->end_off) {
+      return module->export_tbl.find(address) != module->export_tbl.end();
     }
   }
   return false;
 }
 
 void Dumper::TakeModuleSnapshot() {
-  snapshotTaken_ = true;
+  snapshot_taken_ = true;
 
   const HANDLE snapshot =
       CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, process_.dwProcessId);
@@ -923,24 +936,24 @@ void Dumper::TakeModuleSnapshot() {
   }
 
   do {
-    if (reinterpret_cast<uintptr_t>(moduleEntry.hModule) != imageBase_) {
+    if (reinterpret_cast<uintptr_t>(moduleEntry.hModule) != image_base_) {
       auto module = std::make_unique<RemoteModule>();
-      module->Base = reinterpret_cast<uintptr_t>(moduleEntry.modBaseAddr);
-      module->EndOff = module->Base + moduleEntry.modBaseSize;
-      module->Name = AsciiLowerCase(WideToUtf8(moduleEntry.szModule));
+      module->base = reinterpret_cast<uintptr_t>(moduleEntry.modBaseAddr);
+      module->end_off = module->base + moduleEntry.modBaseSize;
+      module->name = AsciiLowerCase(WideToUtf8(moduleEntry.szModule));
       GatherModuleExportsFromRemoteProcess(*module);
 #if !defined(_WIN64)
-      if (module->Name == "user32.dll" && hUsr_ != 0) {
+      if (module->name == "user32.dll" && usr_module_ != 0) {
         CollectSpecialUser32Forwards(*module);
       }
 #endif
-      allModules_.push_back(std::move(module));
+      all_modules_.push_back(std::move(module));
     }
   } while (Module32NextW(snapshot, &moduleEntry));
 
   CloseHandle(snapshot);
 
-  for (const auto& module : allModules_) {
+  for (const auto& module : all_modules_) {
     ResolveForwards(*module);
   }
 }
@@ -949,7 +962,7 @@ bool Dumper::RPM(uintptr_t address, void* buf, size_t size) {
   const BOOL result = ReadProcessMemory(
       process_.hProcess, reinterpret_cast<void*>(address), buf, size, nullptr);
   if (!result) {
-    Log(ltFatal, "RPM failed");
+    Log(kLogFatal, "RPM failed");
   }
   return result != FALSE;
 }
@@ -995,7 +1008,7 @@ void Dumper::SwitchSxSManifestType(Stream& stream, PEHeader& pe, int switchFrom,
     return;
   }
 
-  stream.Seek(resourceSection->Header.PointerToRawData, Stream::Origin::Begin);
+  stream.Seek(resourceSection->header.PointerToRawData, Stream::Origin::kBegin);
   std::vector<uint8_t> resourceData(resourceSize);
   stream.Read(resourceData.data(), resourceData.size());
 
@@ -1039,7 +1052,7 @@ void Dumper::SwitchSxSManifestType(Stream& stream, PEHeader& pe, int switchFrom,
   manifestSubDir &= 0x7FFFFFFF;
   if (readWord(manifestSubDir + 0xC) != 0 ||
       readWord(manifestSubDir + 0xE) != 1) {
-    Log(ltInfo, "Encountered weird manifest resource dir");
+    Log(kLogInfo, "Encountered weird manifest resource dir");
     return;
   }
 
@@ -1048,8 +1061,8 @@ void Dumper::SwitchSxSManifestType(Stream& stream, PEHeader& pe, int switchFrom,
     return;
   }
 
-  stream.Seek(resourceSection->Header.PointerToRawData + idOffset,
-              Stream::Origin::Begin);
+  stream.Seek(resourceSection->header.PointerToRawData + idOffset,
+              Stream::Origin::kBegin);
   const int32_t value = switchTo;
   stream.Write(&value, sizeof(value));
 }
@@ -1058,11 +1071,11 @@ std::vector<OriginalImport> Dumper::GetOriginalImports(
     const std::wstring& fileName) {
   std::vector<OriginalImport> result;
 
-  FileStream file(fileName, FileStream::Mode::Read);
+  FileStream file(fileName, FileStream::Mode::kRead);
   std::vector<uint8_t> headerBuffer(0x1000);
-  const int64_t fileSize = file.Size();
+  const int64_t file_size = file.Size();
   const size_t toRead =
-      std::min<size_t>(headerBuffer.size(), static_cast<size_t>(fileSize));
+      std::min<size_t>(headerBuffer.size(), static_cast<size_t>(file_size));
   if (toRead < sizeof(IMAGE_DOS_HEADER)) {
     return result;
   }
@@ -1077,15 +1090,15 @@ std::vector<OriginalImport> Dumper::GetOriginalImports(
   }
 
   PESection* section = filePe.GetSectionByVA(importDirectory.VirtualAddress);
-  if (section == nullptr || section->Header.SizeOfRawData == 0) {
+  if (section == nullptr || section->header.SizeOfRawData == 0) {
     return result;
   }
 
-  std::vector<uint8_t> sectionBuffer(section->Header.SizeOfRawData);
-  file.Seek(section->Header.PointerToRawData, Stream::Origin::Begin);
+  std::vector<uint8_t> sectionBuffer(section->header.SizeOfRawData);
+  file.Seek(section->header.PointerToRawData, Stream::Origin::kBegin);
   file.Read(sectionBuffer.data(), sectionBuffer.size());
 
-  const uint64_t sectionRva = section->Header.VirtualAddress;
+  const uint64_t sectionRva = section->header.VirtualAddress;
   const auto readCStringAtRva = [&](uint32_t rva, uint32_t extra) {
     const uint64_t offset = static_cast<uint64_t>(rva) - sectionRva + extra;
     if (offset >= sectionBuffer.size()) {
@@ -1150,11 +1163,11 @@ std::vector<OriginalImport> Dumper::GetOriginalImports(
       }
 
       OriginalImport import;
-      import.DllName = AsciiLowerCase(dllName);
+      import.dll_name = AsciiLowerCase(dllName);
       if ((thunk & IMAGE_ORDINAL_FLAG) != 0) {
-        import.FuncName = "#" + std::to_string(thunk & 0xFFFF);
+        import.func_name = "#" + std::to_string(thunk & 0xFFFF);
       } else {
-        import.FuncName = readCStringAtRva(static_cast<uint32_t>(thunk), 2);
+        import.func_name = readCStringAtRva(static_cast<uint32_t>(thunk), 2);
       }
       result.push_back(std::move(import));
     }
@@ -1167,8 +1180,8 @@ std::vector<OriginalImport> Dumper::GetOriginalImports(
 
 bool Dumper::HasOriginalImport(const std::string& dll,
                                const std::string& func) const {
-  for (const OriginalImport& import : originalImports_) {
-    if (import.DllName == dll && import.FuncName == func) {
+  for (const OriginalImport& import : original_imports_) {
+    if (import.dll_name == dll && import.func_name == func) {
       return true;
     }
   }
@@ -1176,29 +1189,20 @@ bool Dumper::HasOriginalImport(const std::string& dll,
 }
 
 // --------------------------------------------------------------------------
-// ImportThunk
-// --------------------------------------------------------------------------
-
-ImportThunk::ImportThunk(RemoteModule* module) : Module(module) {
-  if (module != nullptr) {
-    Name = module->Name;
-  }
-}
-
-// --------------------------------------------------------------------------
 // DumperDotnet
 // --------------------------------------------------------------------------
 
 DumperDotnet::DumperDotnet(const PROCESS_INFORMATION& process,
-                           uintptr_t imageBase)
-    : process_(process), imageBase_(imageBase) {}
+                           uintptr_t image_base)
+    : process_(process), image_base_(image_base) {}
 
 void DumperDotnet::DumpToFile(const std::wstring& fileName) {
   // Dumping Themida .NET binaries appears to be quite simple because no
   // special imports processing is required.
   uint8_t header[0x1000]{};
-  if (!ReadProcessMemory(process_.hProcess, reinterpret_cast<void*>(imageBase_),
-                         header, sizeof(header), nullptr)) {
+  if (!ReadProcessMemory(process_.hProcess,
+                         reinterpret_cast<void*>(image_base_), header,
+                         sizeof(header), nullptr)) {
     throw std::runtime_error("DumpToFile header RPM failed");
   }
 
@@ -1209,9 +1213,9 @@ void DumperDotnet::DumpToFile(const std::wstring& fileName) {
 
   const PESection& lastSection = pe.Sections().back();
   uint32_t size =
-      lastSection.Header.VirtualAddress + lastSection.Header.Misc.VirtualSize;
+      lastSection.header.VirtualAddress + lastSection.header.Misc.VirtualSize;
 
-  FileStream file(fileName, FileStream::Mode::Create);
+  FileStream file(fileName, FileStream::Mode::kCreate);
   std::vector<uint8_t> buffer(size);
 
   uint32_t physicalSize = size;
@@ -1221,14 +1225,14 @@ void DumperDotnet::DumpToFile(const std::wstring& fileName) {
   pe.ntHeaders.OptionalHeader.SizeOfImage = imageSize;
   pe.Sections()[0].Rename(".text");
 
-  LogF(ltInfo, "Output has %d sections, determined size to be 0x%X",
+  LogF(kLogInfo, "Output has %d sections, determined size to be 0x%X",
        pe.ntHeaders.FileHeader.NumberOfSections, size);
 
   uint32_t done = 0;
   while (done < size) {
     MEMORY_BASIC_INFORMATION mbi{};
     mbi.RegionSize = 0x1000;
-    const uintptr_t currentAddress = imageBase_ + done;
+    const uintptr_t currentAddress = image_base_ + done;
     if (VirtualQueryEx(process_.hProcess,
                        reinterpret_cast<void*>(currentAddress), &mbi,
                        sizeof(mbi)) == 0) {

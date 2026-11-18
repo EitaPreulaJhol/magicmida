@@ -106,35 +106,35 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
   ReportStatus("Rebuilding relocations");
   MemoryStream stream;
   stream.LoadFromFile(fileName);
-  const int64_t fileSize = stream.Size();
-  PEHeader pe(stream.Memory(), static_cast<size_t>(fileSize));
+  const int64_t file_size = stream.Size();
+  PEHeader pe(stream.Memory(), static_cast<size_t>(file_size));
   if (pe.Sections().empty()) {
-    Log(ltWarning, "Relocation fix skipped: the image has no sections.");
+    Log(kLogWarning, "Relocation fix skipped: the image has no sections.");
     return false;
   }
 
   IMAGE_NT_HEADERS& nt = pe.ntHeaders;
   if ((nt.FileHeader.Characteristics & IMAGE_FILE_DLL) == 0) {
-    Log(ltWarning, "Relocation fix skipped: the file is not a DLL.");
+    Log(kLogWarning, "Relocation fix skipped: the file is not a DLL.");
     return false;
   }
 
   const uintptr_t preferredBase =
       static_cast<uintptr_t>(nt.OptionalHeader.ImageBase);
-  const uintptr_t imageBase = dumpBase != 0 ? dumpBase : preferredBase;
-  if (imageBase == 0) {
-    Log(ltWarning, "Relocation fix skipped: unknown image base.");
+  const uintptr_t image_base = dumpBase != 0 ? dumpBase : preferredBase;
+  if (image_base == 0) {
+    Log(kLogWarning, "Relocation fix skipped: unknown image base.");
     return false;
   }
 
-  if (imageBase != preferredBase) {
-    LogF(ltWarning,
+  if (image_base != preferredBase) {
+    LogF(kLogWarning,
          "Image was dumped at %llX but its header says %llX; rebuilding "
          "relocations for the dump base.",
-         static_cast<unsigned long long>(imageBase),
+         static_cast<unsigned long long>(image_base),
          static_cast<unsigned long long>(preferredBase));
     nt.OptionalHeader.ImageBase =
-        static_cast<decltype(nt.OptionalHeader.ImageBase)>(imageBase);
+        static_cast<decltype(nt.OptionalHeader.ImageBase)>(image_base);
   }
 
   const uint16_t relocType =
@@ -155,7 +155,7 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
   if (relocDirectory.VirtualAddress != 0 && relocDirectory.Size != 0) {
     const auto& sections = pe.Sections();
     for (size_t i = 0; i < sections.size(); ++i) {
-      const IMAGE_SECTION_HEADER& header = sections[i].Header;
+      const IMAGE_SECTION_HEADER& header = sections[i].header;
       const uint32_t span =
           std::max(header.Misc.VirtualSize, header.SizeOfRawData);
       if (relocDirectory.VirtualAddress >= header.VirtualAddress &&
@@ -167,15 +167,16 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
 
     if (existingRelocSection < pe.Sections().size()) {
       const IMAGE_SECTION_HEADER& header =
-          pe.Sections()[existingRelocSection].Header;
+          pe.Sections()[existingRelocSection].header;
       const uint32_t delta =
           relocDirectory.VirtualAddress - header.VirtualAddress;
       const int64_t begin =
           static_cast<int64_t>(header.PointerToRawData) + delta;
       const int64_t sectionEnd =
           static_cast<int64_t>(header.PointerToRawData) + header.SizeOfRawData;
-      const int64_t end = std::min<int64_t>(
-          begin + relocDirectory.Size, std::min<int64_t>(sectionEnd, fileSize));
+      const int64_t end =
+          std::min<int64_t>(begin + relocDirectory.Size,
+                            std::min<int64_t>(sectionEnd, file_size));
       existingRelocBegin = begin;
       existingRelocEnd = end;
       int64_t position = begin;
@@ -207,7 +208,8 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
       }
 
       if (preserved > 0) {
-        LogF(ltInfo, "Preserving %zu existing relocation entries.", preserved);
+        LogF(kLogInfo, "Preserving %zu existing relocation entries.",
+             preserved);
       }
     }
   }
@@ -219,17 +221,17 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
   // to the image base itself (e.g. a cached hInstance) are common, so the
   // header range counts as well.
   std::vector<std::pair<uintptr_t, uintptr_t>> validRanges;
-  validRanges.emplace_back(imageBase,
-                           imageBase + nt.OptionalHeader.SizeOfHeaders);
+  validRanges.emplace_back(image_base,
+                           image_base + nt.OptionalHeader.SizeOfHeaders);
   for (const PESection& section : pe.Sections()) {
-    const IMAGE_SECTION_HEADER& header = section.Header;
+    const IMAGE_SECTION_HEADER& header = section.header;
     const uint32_t span =
         std::max(header.Misc.VirtualSize, header.SizeOfRawData);
     if (span == 0) {
       continue;
     }
-    validRanges.emplace_back(imageBase + header.VirtualAddress,
-                             imageBase + header.VirtualAddress + span);
+    validRanges.emplace_back(image_base + header.VirtualAddress,
+                             image_base + header.VirtualAddress + span);
   }
 
   const auto isImageAddress = [&validRanges](uintptr_t value) {
@@ -244,7 +246,7 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
   size_t scannedSections = 0;
   const auto& scanSections = pe.Sections();
   for (size_t index = 0; index < scanSections.size(); ++index) {
-    const IMAGE_SECTION_HEADER& header = scanSections[index].Header;
+    const IMAGE_SECTION_HEADER& header = scanSections[index].header;
     const std::string name = SectionName(header);
 
     // .reloc is what we are replacing, .import was synthesized by the dumper
@@ -259,8 +261,8 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
 
     const int64_t begin = static_cast<int64_t>(header.PointerToRawData);
     const int64_t end = begin + header.SizeOfRawData;
-    if (begin < 0 || end > fileSize) {
-      LogF(ltWarning, "Skipping section [%s]: raw data outside the file.",
+    if (begin < 0 || end > file_size) {
+      LogF(kLogWarning, "Skipping section [%s]: raw data outside the file.",
            name.c_str());
       continue;
     }
@@ -286,9 +288,10 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
   }
 
   const size_t entryCount = table.EntryCount();
-  LogF(ltInfo, "Scanned %zu sections for absolute pointers.", scannedSections);
+  LogF(kLogInfo, "Scanned %zu sections for absolute pointers.",
+       scannedSections);
   if (entryCount == 0) {
-    Log(ltWarning,
+    Log(kLogWarning,
         "No image-relative pointers were found; relocation table not rebuilt.");
     return false;
   }
@@ -308,7 +311,7 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
     if (existingRelocSection < sections.size() &&
         existingRelocSection == sections.size() - 1) {
       const IMAGE_SECTION_HEADER& header =
-          sections[existingRelocSection].Header;
+          sections[existingRelocSection].header;
       reuse = SectionName(header) == ".reloc" &&
               relocDirectory.VirtualAddress == header.VirtualAddress &&
               header.SizeOfRawData >= alignedDataSize;
@@ -318,19 +321,19 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
   PESection* relocSection = nullptr;
   if (reuse) {
     relocSection = &pe.Sections()[existingRelocSection];
-    relocSection->Header.Misc.VirtualSize =
+    relocSection->header.Misc.VirtualSize =
         static_cast<uint32_t>(relocData.size());
-    Log(ltInfo, "Reusing the existing .reloc section.");
+    Log(kLogInfo, "Reusing the existing .reloc section.");
   } else {
     // Rename a stale .reloc section so the new one is unambiguous.
     for (PESection& section : pe.Sections()) {
-      if (SectionName(section.Header) == ".reloc") {
+      if (SectionName(section.header) == ".reloc") {
         section.Rename(".reloc0");
-        Log(ltInfo, "Renamed the old .reloc section to .reloc0.");
+        Log(kLogInfo, "Renamed the old .reloc section to .reloc0.");
       }
     }
 
-    const uint32_t headerLimit = pe.Sections()[0].Header.PointerToRawData;
+    const uint32_t headerLimit = pe.Sections()[0].header.PointerToRawData;
     const uint64_t sectionTableEnd =
         static_cast<uint64_t>(pe.LFANew()) + sizeof(IMAGE_NT_HEADERS) +
         (static_cast<uint64_t>(pe.Sections().size()) + 1) *
@@ -340,21 +343,21 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
           "Not enough room in the PE header for a relocation section.");
     }
 
-    const IMAGE_SECTION_HEADER previous = pe.Sections().back().Header;
-    uint32_t virtualAddress =
+    const IMAGE_SECTION_HEADER previous = pe.Sections().back().header;
+    uint32_t virtual_address =
         previous.VirtualAddress + previous.Misc.VirtualSize;
-    pe.SectionAlign(virtualAddress);
+    pe.SectionAlign(virtual_address);
 
     pe.AddSectionToArray();
     relocSection = &pe.Sections().back();
     relocSection->Rename(".reloc");
-    relocSection->Header.VirtualAddress = virtualAddress;
-    relocSection->Header.Misc.VirtualSize =
+    relocSection->header.VirtualAddress = virtual_address;
+    relocSection->header.Misc.VirtualSize =
         static_cast<uint32_t>(relocData.size());
-    relocSection->Header.PointerToRawData =
-        AlignUp(static_cast<uint64_t>(fileSize), fileAlignment);
-    relocSection->Header.SizeOfRawData = alignedDataSize;
-    relocSection->Header.Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA |
+    relocSection->header.PointerToRawData =
+        AlignUp(static_cast<uint64_t>(file_size), fileAlignment);
+    relocSection->header.SizeOfRawData = alignedDataSize;
+    relocSection->header.Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA |
                                            IMAGE_SCN_MEM_READ |
                                            IMAGE_SCN_MEM_DISCARDABLE;
   }
@@ -364,48 +367,48 @@ bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase) {
 
   IMAGE_DATA_DIRECTORY& relocDirectoryOut =
       nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
-  relocDirectoryOut.VirtualAddress = relocSection->Header.VirtualAddress;
+  relocDirectoryOut.VirtualAddress = relocSection->header.VirtualAddress;
   relocDirectoryOut.Size = static_cast<uint32_t>(relocData.size());
 
-  uint32_t sizeOfImage = relocSection->Header.VirtualAddress +
-                         relocSection->Header.Misc.VirtualSize;
-  pe.SectionAlign(sizeOfImage);
-  if (sizeOfImage > nt.OptionalHeader.SizeOfImage) {
-    nt.OptionalHeader.SizeOfImage = sizeOfImage;
+  uint32_t size_of_image = relocSection->header.VirtualAddress +
+                           relocSection->header.Misc.VirtualSize;
+  pe.SectionAlign(size_of_image);
+  if (size_of_image > nt.OptionalHeader.SizeOfImage) {
+    nt.OptionalHeader.SizeOfImage = size_of_image;
   }
 
   // -----------------------------------------------------------------------
   // Write the new section data and the updated headers.
   // -----------------------------------------------------------------------
   const int64_t rawStart =
-      static_cast<int64_t>(relocSection->Header.PointerToRawData);
+      static_cast<int64_t>(relocSection->header.PointerToRawData);
   const int64_t rawEnd =
-      rawStart + static_cast<int64_t>(relocSection->Header.SizeOfRawData);
+      rawStart + static_cast<int64_t>(relocSection->header.SizeOfRawData);
   if (rawEnd > stream.Size()) {
     stream.SetSize(rawEnd);
   }
 
-  stream.Seek(rawStart, Stream::Origin::Begin);
+  stream.Seek(rawStart, Stream::Origin::kBegin);
   stream.Write(relocData.data(), relocData.size());
-  if (relocSection->Header.SizeOfRawData > relocData.size()) {
+  if (relocSection->header.SizeOfRawData > relocData.size()) {
     std::vector<uint8_t> padding(
-        static_cast<size_t>(relocSection->Header.SizeOfRawData) -
+        static_cast<size_t>(relocSection->header.SizeOfRawData) -
             relocData.size(),
         0);
     stream.Write(padding.data(), padding.size());
   }
 
-  stream.Seek(pe.LFANew(), Stream::Origin::Begin);
+  stream.Seek(pe.LFANew(), Stream::Origin::kBegin);
   stream.Write(&nt, sizeof(nt));
   for (const PESection& section : pe.Sections()) {
-    stream.Write(&section.Header, sizeof(IMAGE_SECTION_HEADER));
+    stream.Write(&section.header, sizeof(IMAGE_SECTION_HEADER));
   }
 
   stream.SaveToFile(fileName);
 
-  LogF(ltGood, "Rebuilt DLL relocation table: %zu entries in %zu pages.",
+  LogF(kLogGood, "Rebuilt DLL relocation table: %zu entries in %zu pages.",
        entryCount, table.PageCount());
-  Log(ltWarning,
+  Log(kLogWarning,
       "Reconstructed relocations are heuristic; test the DLL when loading it "
       "at another base.");
   return true;

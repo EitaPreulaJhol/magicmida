@@ -14,7 +14,7 @@ class ThemidaDebugger64 : public ThemidaCommon {
  public:
   ThemidaDebugger64(const std::wstring& executable,
                     const std::wstring& parameters, bool createData,
-                    bool useScyllaHide = true, bool fixRelocations = false);
+                    bool use_scylla_hide = true, bool fix_relocations = false);
   ~ThemidaDebugger64() override = default;
 
  protected:
@@ -47,21 +47,21 @@ class ThemidaDebugger64 : public ThemidaCommon {
   uintptr_t TryFindCorrectOEP(uintptr_t hitAddress);
   void WriteMSVCOEP(uintptr_t crtStartup);
 
-  void* closeHandleAPI_ = nullptr;
-  void* virtualAllocAPI_ = nullptr;
-  void* corExeMain_ = nullptr;
+  void* close_handle_api_ = nullptr;
+  void* virtual_alloc_api_ = nullptr;
+  void* cor_exe_main_ = nullptr;
 
-  uintptr_t guardStart_ = 0;
-  uintptr_t guardEnd_ = 0;
-  bool guardStepping_ = false;
-  bool tmGuard_ = false;
-  bool traceMSVCOEP_ = false;
+  uintptr_t guard_start_ = 0;
+  uintptr_t guard_end_ = 0;
+  bool guard_stepping_ = false;
+  bool tm_guard_ = false;
+  bool trace_msvc_oep_ = false;
 
-  uintptr_t msvcInitCookie_ = 0;
-  uintptr_t msvcOEP_ = 0;
+  uintptr_t msvc_init_cookie_ = 0;
+  uintptr_t msvc_oep_ = 0;
 
-  uint32_t tlsCounter_ = 0;
-  uint32_t tlsTotal_ = 0;
+  uint32_t tls_counter_ = 0;
+  uint32_t tls_total_ = 0;
 };
 
 }  // namespace magicmida

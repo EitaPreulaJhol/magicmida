@@ -13,38 +13,38 @@ namespace scyllahide {
 // Subset of the ScyllaHide "Magicmida" profile that is compiled into the
 // executable.  Keeping it in C++ means no scylla_hide.ini has to be shipped.
 struct Profile {
-  bool hookGetLocalTime = false;
-  bool hookGetSystemTime = false;
-  bool hookGetTickCount = false;
-  bool hookGetTickCount64 = false;
-  bool hookKiUserExceptionDispatcher = false;
-  bool hookNtClose = false;
-  bool hookNtContinue = false;
-  bool hookNtCreateThreadEx = false;
-  bool hookNtGetContextThread = true;
-  bool hookNtQueryInformationProcess = true;
-  bool hookNtQueryObject = false;
-  bool hookNtQueryPerformanceCounter = false;
-  bool hookNtQuerySystemInformation = true;
-  bool hookNtQuerySystemTime = false;
-  bool hookNtSetContextThread = false;
-  bool hookNtSetDebugFilterState = false;
-  bool hookNtSetInformationThread = true;
-  bool hookNtSetInformationProcess = false;
-  bool hookNtUserBlockInput = false;
-  bool hookNtUserBuildHwndList = false;
-  bool hookNtUserFindWindowEx = false;
-  bool hookNtUserQueryWindow = false;
-  bool hookNtUserGetForegroundWindow = true;
-  bool hookNtYieldExecution = false;
-  bool hookOutputDebugStringA = false;
+  bool hook_get_local_time = false;
+  bool hook_get_system_time = false;
+  bool hook_get_tick_count = false;
+  bool hook_get_tick_count64 = false;
+  bool hook_ki_user_exception_dispatcher = false;
+  bool hook_nt_close = false;
+  bool hook_nt_continue = false;
+  bool hook_nt_create_thread_ex = false;
+  bool hook_nt_get_context_thread = true;
+  bool hook_nt_query_information_process = true;
+  bool hook_nt_query_object = false;
+  bool hook_nt_query_performance_counter = false;
+  bool hook_nt_query_system_information = true;
+  bool hook_nt_query_system_time = false;
+  bool hook_nt_set_context_thread = false;
+  bool hook_nt_set_debug_filter_state = false;
+  bool hook_nt_set_information_thread = true;
+  bool hook_nt_set_information_process = false;
+  bool hook_nt_user_block_input = false;
+  bool hook_nt_user_build_hwnd_list = false;
+  bool hook_nt_user_find_window_ex = false;
+  bool hook_nt_user_query_window = false;
+  bool hook_nt_user_get_foreground_window = true;
+  bool hook_nt_yield_execution = false;
+  bool hook_output_debug_string_a = false;
 
-  bool fixPebBeingDebugged = true;
-  bool fixPebHeapFlags = true;
-  bool fixPebNtGlobalFlag = true;
-  bool fixPebStartupInfo = false;
-  bool fixPebOsBuildNumber = false;
-  bool preventThreadCreation = false;
+  bool fix_peb_being_debugged = true;
+  bool fix_peb_heap_flags = true;
+  bool fix_peb_nt_global_flag = true;
+  bool fix_peb_startup_info = false;
+  bool fix_peb_os_build_number = false;
+  bool prevent_thread_creation = false;
 };
 
 // Pinned ScyllaHide commit, shown by --version and the debug log.

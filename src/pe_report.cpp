@@ -47,42 +47,42 @@ std::string ArchitectureName(uint16_t machine) {
 
 struct ParsedSection {
   std::string name;
-  uint32_t virtualAddress = 0;
-  uint32_t virtualSize = 0;
-  uint32_t rawOffset = 0;
-  uint32_t rawSize = 0;
+  uint32_t virtual_address = 0;
+  uint32_t virtual_size = 0;
+  uint32_t raw_offset = 0;
+  uint32_t raw_size = 0;
   uint32_t characteristics = 0;
 };
 
 struct ParsedPE {
   bool valid = false;
   uint16_t machine = 0;
-  uint16_t numberOfSections = 0;
-  uint16_t linkerMajor = 0;
-  uint16_t linkerMinor = 0;
+  uint16_t number_of_sections = 0;
+  uint16_t linker_major = 0;
+  uint16_t linker_minor = 0;
   uint32_t timestamp = 0;
-  uint16_t optionalMagic = 0;
-  uint32_t entryPoint = 0;
-  uint64_t imageBase = 0;
-  uint32_t sizeOfImage = 0;
+  uint16_t optional_magic = 0;
+  uint32_t entry_point = 0;
+  uint64_t image_base = 0;
+  uint32_t size_of_image = 0;
   uint32_t checksum = 0;
-  uint16_t dllCharacteristics = 0;
-  bool isDll = false;
-  bool relocsStripped = false;
-  uint32_t relocRva = 0;
-  uint32_t relocSize = 0;
-  uint32_t importRva = 0;
-  uint32_t importSize = 0;
-  uint64_t fileSize = 0;
+  uint16_t dll_characteristics = 0;
+  bool is_dll = false;
+  bool relocs_stripped = false;
+  uint32_t reloc_rva = 0;
+  uint32_t reloc_size = 0;
+  uint32_t import_rva = 0;
+  uint32_t import_size = 0;
+  uint64_t file_size = 0;
   std::vector<ParsedSection> sections;
 };
 
 ParsedPE ReadPEInfo(const std::wstring& path) {
   ParsedPE result;
 
-  FileStream file(path, FileStream::Mode::Read);
+  FileStream file(path, FileStream::Mode::kRead);
   std::vector<uint8_t> header(0x1000);
-  result.fileSize = static_cast<uint64_t>(file.Size());
+  result.file_size = static_cast<uint64_t>(file.Size());
   const size_t toRead = static_cast<size_t>(
       std::min<int64_t>(static_cast<int64_t>(header.size()), file.Size()));
   if (toRead < sizeof(IMAGE_DOS_HEADER)) {
@@ -105,10 +105,10 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
   const auto* fileHeader = reinterpret_cast<const IMAGE_FILE_HEADER*>(
       header.data() + ntOffset + sizeof(uint32_t));
   result.machine = fileHeader->Machine;
-  result.numberOfSections = fileHeader->NumberOfSections;
+  result.number_of_sections = fileHeader->NumberOfSections;
   result.timestamp = fileHeader->TimeDateStamp;
-  result.isDll = (fileHeader->Characteristics & IMAGE_FILE_DLL) != 0;
-  result.relocsStripped =
+  result.is_dll = (fileHeader->Characteristics & IMAGE_FILE_DLL) != 0;
+  result.relocs_stripped =
       (fileHeader->Characteristics & IMAGE_FILE_RELOCS_STRIPPED) != 0;
 
   const size_t optionalOffset =
@@ -116,57 +116,59 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
   if (optionalOffset + 2 > toRead) {
     throw std::runtime_error("Missing optional header.");
   }
-  result.optionalMagic =
+  result.optional_magic =
       *reinterpret_cast<const uint16_t*>(header.data() + optionalOffset);
 
-  if (result.optionalMagic == 0x10B) {
+  if (result.optional_magic == 0x10B) {
     if (optionalOffset + sizeof(IMAGE_OPTIONAL_HEADER32) > toRead) {
       throw std::runtime_error("Truncated PE32 optional header.");
     }
     const auto* optional = reinterpret_cast<const IMAGE_OPTIONAL_HEADER32*>(
         header.data() + optionalOffset);
-    result.linkerMajor = optional->MajorLinkerVersion;
-    result.linkerMinor = optional->MinorLinkerVersion;
-    result.entryPoint = optional->AddressOfEntryPoint;
-    result.imageBase = optional->ImageBase;
-    result.sizeOfImage = optional->SizeOfImage;
+    result.linker_major = optional->MajorLinkerVersion;
+    result.linker_minor = optional->MinorLinkerVersion;
+    result.entry_point = optional->AddressOfEntryPoint;
+    result.image_base = optional->ImageBase;
+    result.size_of_image = optional->SizeOfImage;
     result.checksum = optional->CheckSum;
-    result.dllCharacteristics = optional->DllCharacteristics;
+    result.dll_characteristics = optional->DllCharacteristics;
     if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_BASERELOC) {
-      result.relocRva = optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
-                            .VirtualAddress;
-      result.relocSize =
+      result.reloc_rva =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
+              .VirtualAddress;
+      result.reloc_size =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
     }
     if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_IMPORT) {
-      result.importRva =
+      result.import_rva =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-      result.importSize =
+      result.import_size =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
     }
-  } else if (result.optionalMagic == 0x20B) {
+  } else if (result.optional_magic == 0x20B) {
     if (optionalOffset + sizeof(IMAGE_OPTIONAL_HEADER64) > toRead) {
       throw std::runtime_error("Truncated PE32+ optional header.");
     }
     const auto* optional = reinterpret_cast<const IMAGE_OPTIONAL_HEADER64*>(
         header.data() + optionalOffset);
-    result.linkerMajor = optional->MajorLinkerVersion;
-    result.linkerMinor = optional->MinorLinkerVersion;
-    result.entryPoint = optional->AddressOfEntryPoint;
-    result.imageBase = optional->ImageBase;
-    result.sizeOfImage = optional->SizeOfImage;
+    result.linker_major = optional->MajorLinkerVersion;
+    result.linker_minor = optional->MinorLinkerVersion;
+    result.entry_point = optional->AddressOfEntryPoint;
+    result.image_base = optional->ImageBase;
+    result.size_of_image = optional->SizeOfImage;
     result.checksum = optional->CheckSum;
-    result.dllCharacteristics = optional->DllCharacteristics;
+    result.dll_characteristics = optional->DllCharacteristics;
     if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_BASERELOC) {
-      result.relocRva = optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
-                            .VirtualAddress;
-      result.relocSize =
+      result.reloc_rva =
+          optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
+              .VirtualAddress;
+      result.reloc_size =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
     }
     if (optional->NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_IMPORT) {
-      result.importRva =
+      result.import_rva =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-      result.importSize =
+      result.import_size =
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
     }
   } else {
@@ -190,10 +192,10 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
     std::memcpy(name, section->Name, 8);
     ParsedSection parsed;
     parsed.name = name;
-    parsed.virtualAddress = section->VirtualAddress;
-    parsed.virtualSize = section->Misc.VirtualSize;
-    parsed.rawOffset = section->PointerToRawData;
-    parsed.rawSize = section->SizeOfRawData;
+    parsed.virtual_address = section->VirtualAddress;
+    parsed.virtual_size = section->Misc.VirtualSize;
+    parsed.raw_offset = section->PointerToRawData;
+    parsed.raw_size = section->SizeOfRawData;
     parsed.characteristics = section->Characteristics;
     result.sections.push_back(std::move(parsed));
   }
@@ -209,14 +211,14 @@ uint16_t ReadPEMachine(const std::wstring& target) {
 }
 
 bool ReadPEIsDll(const std::wstring& target) {
-  return ReadPEInfo(target).isDll;
+  return ReadPEInfo(target).is_dll;
 }
 
 PEFlags ReadPEFlags(const std::wstring& target) {
   const ParsedPE info = ReadPEInfo(target);
   PEFlags flags;
   flags.machine = info.machine;
-  flags.isDll = info.isDll;
+  flags.is_dll = info.is_dll;
   return flags;
 }
 
@@ -227,21 +229,21 @@ void EmitPEInfo(const std::wstring& target,
   emit(Format("File:             %s", WideToUtf8(target).c_str()));
   emit(Format("Machine:          %s", MachineName(info.machine).c_str()));
   emit(Format("Architecture:     %s", ArchitectureName(info.machine).c_str()));
-  emit(Format("Type:             %s", info.isDll ? "DLL" : "EXE"));
-  emit(Format("Linker:           %u.%u", info.linkerMajor, info.linkerMinor));
+  emit(Format("Type:             %s", info.is_dll ? "DLL" : "EXE"));
+  emit(Format("Linker:           %u.%u", info.linker_major, info.linker_minor));
   emit(Format("Timestamp:        0x%08X", info.timestamp));
   emit(Format("Image base:       0x%llX",
-              static_cast<unsigned long long>(info.imageBase)));
-  emit(Format("Entry point:      0x%X", info.entryPoint));
-  emit(Format("Size of image:    0x%X", info.sizeOfImage));
+              static_cast<unsigned long long>(info.image_base)));
+  emit(Format("Entry point:      0x%X", info.entry_point));
+  emit(Format("Size of image:    0x%X", info.size_of_image));
   emit(Format("Checksum:         0x%X", info.checksum));
-  emit(Format("DLL flags:        0x%04X%s", info.dllCharacteristics,
-              (info.dllCharacteristics & 0x40) ? " (ASLR)" : ""));
+  emit(Format("DLL flags:        0x%04X%s", info.dll_characteristics,
+              (info.dll_characteristics & 0x40) ? " (ASLR)" : ""));
   emit(Format("Relocations:      %s (RVA 0x%X, size 0x%X)%s",
-              (info.relocRva != 0 && info.relocSize != 0) ? "yes" : "no",
-              info.relocRva, info.relocSize,
-              info.relocsStripped ? " [stripped flag set]" : ""));
-  emit(Format("Sections:         %u", info.numberOfSections));
+              (info.reloc_rva != 0 && info.reloc_size != 0) ? "yes" : "no",
+              info.reloc_rva, info.reloc_size,
+              info.relocs_stripped ? " [stripped flag set]" : ""));
+  emit(Format("Sections:         %u", info.number_of_sections));
   emit("");
   emit(Format("  %-8s %-10s %-10s %-10s %-10s %s", "Name", "VA", "VSize",
               "RawOff", "RawSize", "Flags"));
@@ -255,45 +257,45 @@ void EmitPEInfo(const std::wstring& target,
     if (section.characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA)
       flags += "U";
     emit(Format("  %-8s %08X   %08X   %08X   %08X   %s", section.name.c_str(),
-                section.virtualAddress, section.virtualSize, section.rawOffset,
-                section.rawSize, flags.c_str()));
+                section.virtual_address, section.virtual_size,
+                section.raw_offset, section.raw_size, flags.c_str()));
   }
 }
 
-void VerifyDump(const std::wstring& target, bool isDll,
-                bool relocationsExpected) {
+void VerifyDump(const std::wstring& target, bool is_dll,
+                bool relocations_expected) {
   ParsedPE info;
   try {
     info = ReadPEInfo(target);
   } catch (const std::exception& error) {
-    LogF(ltFatal, "Dump verification failed: %s", error.what());
+    LogF(kLogFatal, "Dump verification failed: %s", error.what());
     return;
   }
 
-  Log(ltInfo, "Verifying the dump...");
+  Log(kLogInfo, "Verifying the dump...");
   bool ok = true;
 
   const ParsedSection* entrySection = nullptr;
   for (const ParsedSection& section : info.sections) {
-    const uint32_t span = std::max(section.virtualSize, section.rawSize);
-    if (info.entryPoint >= section.virtualAddress &&
-        info.entryPoint < section.virtualAddress + span) {
+    const uint32_t span = std::max(section.virtual_size, section.raw_size);
+    if (info.entry_point >= section.virtual_address &&
+        info.entry_point < section.virtual_address + span) {
       entrySection = &section;
       break;
     }
   }
-  if (info.entryPoint == 0) {
-    Log(ltInfo, "No entry point (AddressOfEntryPoint is zero).");
+  if (info.entry_point == 0) {
+    Log(kLogInfo, "No entry point (AddressOfEntryPoint is zero).");
   } else if (entrySection == nullptr) {
-    LogF(ltWarning, "Entry point 0x%X is outside every section.",
-         info.entryPoint);
+    LogF(kLogWarning, "Entry point 0x%X is outside every section.",
+         info.entry_point);
     ok = false;
   } else if ((entrySection->characteristics & IMAGE_SCN_MEM_EXECUTE) == 0) {
-    LogF(ltWarning, "Entry point 0x%X is in non-executable section %s.",
-         info.entryPoint, entrySection->name.c_str());
+    LogF(kLogWarning, "Entry point 0x%X is in non-executable section %s.",
+         info.entry_point, entrySection->name.c_str());
     ok = false;
   } else {
-    LogF(ltInfo, "Entry point 0x%X is in %s.", info.entryPoint,
+    LogF(kLogInfo, "Entry point 0x%X is in %s.", info.entry_point,
          entrySection->name.c_str());
   }
 
@@ -301,52 +303,53 @@ void VerifyDump(const std::wstring& target, bool isDll,
   for (const ParsedSection& section : info.sections) {
     virtualEnd = std::max<uint64_t>(
         virtualEnd,
-        static_cast<uint64_t>(section.virtualAddress) + section.virtualSize);
-    if (section.rawSize != 0 &&
-        static_cast<uint64_t>(section.rawOffset) + section.rawSize >
-            info.fileSize) {
-      LogF(ltWarning,
+        static_cast<uint64_t>(section.virtual_address) + section.virtual_size);
+    if (section.raw_size != 0 &&
+        static_cast<uint64_t>(section.raw_offset) + section.raw_size >
+            info.file_size) {
+      LogF(kLogWarning,
            "Section %s raw data (0x%X+0x%X) lies outside the file (0x%llX).",
-           section.name.c_str(), section.rawOffset, section.rawSize,
-           static_cast<unsigned long long>(info.fileSize));
+           section.name.c_str(), section.raw_offset, section.raw_size,
+           static_cast<unsigned long long>(info.file_size));
       ok = false;
     }
     if ((section.characteristics & IMAGE_SCN_MEM_WRITE) != 0 &&
         (section.characteristics & IMAGE_SCN_MEM_EXECUTE) != 0) {
-      LogF(ltWarning, "Section %s is both writable and executable.",
+      LogF(kLogWarning, "Section %s is both writable and executable.",
            section.name.c_str());
     }
   }
-  if (virtualEnd > info.sizeOfImage) {
-    LogF(ltWarning, "SizeOfImage 0x%X is smaller than the sections end 0x%llX.",
-         info.sizeOfImage, static_cast<unsigned long long>(virtualEnd));
+  if (virtualEnd > info.size_of_image) {
+    LogF(kLogWarning,
+         "SizeOfImage 0x%X is smaller than the sections end 0x%llX.",
+         info.size_of_image, static_cast<unsigned long long>(virtualEnd));
     ok = false;
   }
 
-  if (info.importRva != 0 && info.importSize != 0) {
-    LogF(ltInfo, "Import directory present (RVA 0x%X, size 0x%X).",
-         info.importRva, info.importSize);
+  if (info.import_rva != 0 && info.import_size != 0) {
+    LogF(kLogInfo, "Import directory present (RVA 0x%X, size 0x%X).",
+         info.import_rva, info.import_size);
   } else {
-    Log(ltWarning, "The dump has no import directory.");
+    Log(kLogWarning, "The dump has no import directory.");
     ok = false;
   }
 
-  if (info.relocRva != 0 && info.relocSize != 0) {
-    LogF(ltInfo, "Relocation directory present (RVA 0x%X, size 0x%X).",
-         info.relocRva, info.relocSize);
-  } else if (isDll && relocationsExpected) {
-    Log(ltWarning, "Relocations were requested but the dump has none.");
+  if (info.reloc_rva != 0 && info.reloc_size != 0) {
+    LogF(kLogInfo, "Relocation directory present (RVA 0x%X, size 0x%X).",
+         info.reloc_rva, info.reloc_size);
+  } else if (is_dll && relocations_expected) {
+    Log(kLogWarning, "Relocations were requested but the dump has none.");
     ok = false;
-  } else if (isDll) {
-    Log(ltWarning,
+  } else if (is_dll) {
+    Log(kLogWarning,
         "The DLL has no relocation table; it can only load at its ImageBase. "
         "Enable Fix DLL relocations to rebuild it.");
   }
 
   if (ok) {
-    Log(ltGood, "Dump sanity check passed.");
+    Log(kLogGood, "Dump sanity check passed.");
   } else {
-    Log(ltWarning, "Dump sanity check reported problems.");
+    Log(kLogWarning, "Dump sanity check reported problems.");
   }
 }
 

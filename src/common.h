@@ -39,12 +39,12 @@ namespace magicmida {
 // Logging
 // --------------------------------------------------------------------------
 
-enum class LogMsgType { Info, Good, Warning, Fatal };
+enum class LogMsgType { kInfo, kGood, kWarning, kFatal };
 
-constexpr LogMsgType ltInfo = LogMsgType::Info;
-constexpr LogMsgType ltGood = LogMsgType::Good;
-constexpr LogMsgType ltWarning = LogMsgType::Warning;
-constexpr LogMsgType ltFatal = LogMsgType::Fatal;
+constexpr LogMsgType kLogInfo = LogMsgType::kInfo;
+constexpr LogMsgType kLogGood = LogMsgType::kGood;
+constexpr LogMsgType kLogWarning = LogMsgType::kWarning;
+constexpr LogMsgType kLogFatal = LogMsgType::kFatal;
 
 using LogProc = std::function<void(LogMsgType, const std::string&)>;
 
@@ -101,14 +101,15 @@ std::wstring MakeUnpackedFileName(const std::wstring& executable);
 // --------------------------------------------------------------------------
 
 struct MemoryRegion {
-  uintptr_t Address = 0;
-  size_t Size = 0;
+  uintptr_t address = 0;
+  size_t size = 0;
 
   MemoryRegion() = default;
-  MemoryRegion(uintptr_t address, size_t size) : Address(address), Size(size) {}
+  MemoryRegion(uintptr_t region_address, size_t region_size)
+      : address(region_address), size(region_size) {}
 
-  bool Contains(uintptr_t address) const {
-    return address >= Address && address < Address + Size;
+  bool Contains(uintptr_t candidate) const {
+    return candidate >= address && candidate < address + size;
   }
 };
 
@@ -141,25 +142,13 @@ extern "C" LONG __stdcall RtlGetVersion(OSVERSIONINFOW* info);
 
 // Windows structs missing from the public SDK headers.
 struct ProcessBasicInformation {
-  NtStatus ExitStatus;
-  PVOID PebBaseAddress;
-  ULONG_PTR AffinityMask;
-  DWORD BasePriority;
-  ULONG_PTR UniqueProcessId;
-  ULONG_PTR InheritedFromUniqueProcessId;
+  NtStatus exit_status;
+  PVOID peb_base_address;
+  ULONG_PTR affinity_mask;
+  DWORD base_priority;
+  ULONG_PTR unique_process_id;
+  ULONG_PTR inherited_from_unique_process_id;
 };
-
-struct ThreadBasicInformation {
-  NtStatus ExitStatus;
-  PVOID TebBaseAddress;
-  HANDLE UniqueProcess;
-  HANDLE UniqueThread;
-  ULONG_PTR AffinityMask;
-  DWORD Priority;
-  DWORD BasePriority;
-};
-
-constexpr NtStatus STATUS_SUCCESS_VALUE = 0;
 
 }  // namespace magicmida
 

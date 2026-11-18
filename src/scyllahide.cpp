@@ -35,8 +35,8 @@ constexpr WORD kRtRcData = 10;
 struct Session {
   HANDLE process = nullptr;
   std::vector<uint8_t> image;
-  void* remoteBase = nullptr;
-  HOOK_DLL_DATA hookData{};
+  void* remote_base = nullptr;
+  HOOK_DLL_DATA hook_data{};
 
   ~Session() {
     if (process != nullptr) {
@@ -48,15 +48,15 @@ struct Session {
 std::unique_ptr<Session> g_session;
 
 void ScyllaLogInfo(const wchar_t* msg) {
-  LogF(ltInfo, "ScyllaHide: %s", WideToUtf8(msg).c_str());
+  LogF(kLogInfo, "ScyllaHide: %s", WideToUtf8(msg).c_str());
 }
 
 void ScyllaLogError(const wchar_t* msg) {
-  LogF(ltFatal, "ScyllaHide: %s", WideToUtf8(msg).c_str());
+  LogF(kLogFatal, "ScyllaHide: %s", WideToUtf8(msg).c_str());
 }
 
 void ScyllaLogDebug(const wchar_t* msg) {
-  LogF(ltInfo, "ScyllaHide: %s", WideToUtf8(msg).c_str());
+  LogF(kLogInfo, "ScyllaHide: %s", WideToUtf8(msg).c_str());
 }
 
 void LogProfile(const Profile& profile) {
@@ -71,41 +71,41 @@ void LogProfile(const Profile& profile) {
     hooks += name;
   };
 
-  add("GetLocalTime", profile.hookGetLocalTime);
-  add("GetSystemTime", profile.hookGetSystemTime);
-  add("GetTickCount", profile.hookGetTickCount);
-  add("GetTickCount64", profile.hookGetTickCount64);
-  add("KiUserExceptionDispatcher", profile.hookKiUserExceptionDispatcher);
-  add("NtClose", profile.hookNtClose);
-  add("NtContinue", profile.hookNtContinue);
-  add("NtCreateThreadEx", profile.hookNtCreateThreadEx);
-  add("NtGetContextThread", profile.hookNtGetContextThread);
-  add("NtQueryInformationProcess", profile.hookNtQueryInformationProcess);
-  add("NtQueryObject", profile.hookNtQueryObject);
-  add("NtQueryPerformanceCounter", profile.hookNtQueryPerformanceCounter);
-  add("NtQuerySystemInformation", profile.hookNtQuerySystemInformation);
-  add("NtQuerySystemTime", profile.hookNtQuerySystemTime);
-  add("NtSetContextThread", profile.hookNtSetContextThread);
-  add("NtSetDebugFilterState", profile.hookNtSetDebugFilterState);
-  add("NtSetInformationThread", profile.hookNtSetInformationThread);
-  add("NtSetInformationProcess", profile.hookNtSetInformationProcess);
-  add("NtUserBlockInput", profile.hookNtUserBlockInput);
-  add("NtUserBuildHwndList", profile.hookNtUserBuildHwndList);
-  add("NtUserFindWindowEx", profile.hookNtUserFindWindowEx);
-  add("NtUserQueryWindow", profile.hookNtUserQueryWindow);
-  add("NtUserGetForegroundWindow", profile.hookNtUserGetForegroundWindow);
-  add("NtYieldExecution", profile.hookNtYieldExecution);
-  add("OutputDebugStringA", profile.hookOutputDebugStringA);
-  add("PreventThreadCreation", profile.preventThreadCreation);
+  add("GetLocalTime", profile.hook_get_local_time);
+  add("GetSystemTime", profile.hook_get_system_time);
+  add("GetTickCount", profile.hook_get_tick_count);
+  add("GetTickCount64", profile.hook_get_tick_count64);
+  add("KiUserExceptionDispatcher", profile.hook_ki_user_exception_dispatcher);
+  add("NtClose", profile.hook_nt_close);
+  add("NtContinue", profile.hook_nt_continue);
+  add("NtCreateThreadEx", profile.hook_nt_create_thread_ex);
+  add("NtGetContextThread", profile.hook_nt_get_context_thread);
+  add("NtQueryInformationProcess", profile.hook_nt_query_information_process);
+  add("NtQueryObject", profile.hook_nt_query_object);
+  add("NtQueryPerformanceCounter", profile.hook_nt_query_performance_counter);
+  add("NtQuerySystemInformation", profile.hook_nt_query_system_information);
+  add("NtQuerySystemTime", profile.hook_nt_query_system_time);
+  add("NtSetContextThread", profile.hook_nt_set_context_thread);
+  add("NtSetDebugFilterState", profile.hook_nt_set_debug_filter_state);
+  add("NtSetInformationThread", profile.hook_nt_set_information_thread);
+  add("NtSetInformationProcess", profile.hook_nt_set_information_process);
+  add("NtUserBlockInput", profile.hook_nt_user_block_input);
+  add("NtUserBuildHwndList", profile.hook_nt_user_build_hwnd_list);
+  add("NtUserFindWindowEx", profile.hook_nt_user_find_window_ex);
+  add("NtUserQueryWindow", profile.hook_nt_user_query_window);
+  add("NtUserGetForegroundWindow", profile.hook_nt_user_get_foreground_window);
+  add("NtYieldExecution", profile.hook_nt_yield_execution);
+  add("OutputDebugStringA", profile.hook_output_debug_string_a);
+  add("PreventThreadCreation", profile.prevent_thread_creation);
 
-  LogF(ltInfo, "ScyllaHide %s profile hooks: %s", Version(),
+  LogF(kLogInfo, "ScyllaHide %s profile hooks: %s", Version(),
        hooks.empty() ? "(none)" : hooks.c_str());
-  LogF(ltInfo,
+  LogF(kLogInfo,
        "ScyllaHide %s PEB patches: being=%d heap=%d ntglobal=%d startup=%d "
        "osbuild=%d",
-       Version(), profile.fixPebBeingDebugged, profile.fixPebHeapFlags,
-       profile.fixPebNtGlobalFlag, profile.fixPebStartupInfo,
-       profile.fixPebOsBuildNumber);
+       Version(), profile.fix_peb_being_debugged, profile.fix_peb_heap_flags,
+       profile.fix_peb_nt_global_flag, profile.fix_peb_startup_info,
+       profile.fix_peb_os_build_number);
 }
 
 bool DebugLoggingEnabled() {
@@ -122,7 +122,7 @@ bool ReadNtApiInformation(HOOK_DLL_DATA* hdd) {
                             "NtUserGetForegroundWindow", "NtUserGetClassName",
                             "NtUserInternalGetWindowText",
                             "NtUserGetThreadState"})) {
-    Log(ltWarning, "ScyllaHide: failed to resolve user32/win32u syscalls");
+    Log(kLogWarning, "ScyllaHide: failed to resolve user32/win32u syscalls");
     return false;
   }
 
@@ -140,43 +140,45 @@ bool ReadNtApiInformation(HOOK_DLL_DATA* hdd) {
 }
 
 void FillHookDllData(HOOK_DLL_DATA* hdd, const Profile& profile) {
-  hdd->EnableGetLocalTimeHook = profile.hookGetLocalTime;
-  hdd->EnableGetSystemTimeHook = profile.hookGetSystemTime;
-  hdd->EnableGetTickCountHook = profile.hookGetTickCount;
-  hdd->EnableGetTickCount64Hook = profile.hookGetTickCount64;
+  hdd->EnableGetLocalTimeHook = profile.hook_get_local_time;
+  hdd->EnableGetSystemTimeHook = profile.hook_get_system_time;
+  hdd->EnableGetTickCountHook = profile.hook_get_tick_count;
+  hdd->EnableGetTickCount64Hook = profile.hook_get_tick_count64;
   hdd->EnableKiUserExceptionDispatcherHook =
-      profile.hookKiUserExceptionDispatcher;
-  hdd->EnableNtCloseHook = profile.hookNtClose;
-  hdd->EnableNtContinueHook = profile.hookNtContinue;
-  hdd->EnableNtCreateThreadExHook = profile.hookNtCreateThreadEx;
-  hdd->EnableNtGetContextThreadHook = profile.hookNtGetContextThread;
+      profile.hook_ki_user_exception_dispatcher;
+  hdd->EnableNtCloseHook = profile.hook_nt_close;
+  hdd->EnableNtContinueHook = profile.hook_nt_continue;
+  hdd->EnableNtCreateThreadExHook = profile.hook_nt_create_thread_ex;
+  hdd->EnableNtGetContextThreadHook = profile.hook_nt_get_context_thread;
   hdd->EnableNtQueryInformationProcessHook =
-      profile.hookNtQueryInformationProcess;
-  hdd->EnableNtQueryObjectHook = profile.hookNtQueryObject;
+      profile.hook_nt_query_information_process;
+  hdd->EnableNtQueryObjectHook = profile.hook_nt_query_object;
   hdd->EnableNtQueryPerformanceCounterHook =
-      profile.hookNtQueryPerformanceCounter;
+      profile.hook_nt_query_performance_counter;
   hdd->EnableNtQuerySystemInformationHook =
-      profile.hookNtQuerySystemInformation;
-  hdd->EnableNtQuerySystemTimeHook = profile.hookNtQuerySystemTime;
-  hdd->EnableNtSetContextThreadHook = profile.hookNtSetContextThread;
-  hdd->EnableNtSetDebugFilterStateHook = profile.hookNtSetDebugFilterState;
-  hdd->EnableNtSetInformationThreadHook = profile.hookNtSetInformationThread;
-  hdd->EnableNtSetInformationProcessHook = profile.hookNtSetInformationProcess;
-  hdd->EnableNtUserBlockInputHook = profile.hookNtUserBlockInput;
-  hdd->EnableNtUserBuildHwndListHook = profile.hookNtUserBuildHwndList;
-  hdd->EnableNtUserFindWindowExHook = profile.hookNtUserFindWindowEx;
-  hdd->EnableNtUserQueryWindowHook = profile.hookNtUserQueryWindow;
+      profile.hook_nt_query_system_information;
+  hdd->EnableNtQuerySystemTimeHook = profile.hook_nt_query_system_time;
+  hdd->EnableNtSetContextThreadHook = profile.hook_nt_set_context_thread;
+  hdd->EnableNtSetDebugFilterStateHook = profile.hook_nt_set_debug_filter_state;
+  hdd->EnableNtSetInformationThreadHook =
+      profile.hook_nt_set_information_thread;
+  hdd->EnableNtSetInformationProcessHook =
+      profile.hook_nt_set_information_process;
+  hdd->EnableNtUserBlockInputHook = profile.hook_nt_user_block_input;
+  hdd->EnableNtUserBuildHwndListHook = profile.hook_nt_user_build_hwnd_list;
+  hdd->EnableNtUserFindWindowExHook = profile.hook_nt_user_find_window_ex;
+  hdd->EnableNtUserQueryWindowHook = profile.hook_nt_user_query_window;
   hdd->EnableNtUserGetForegroundWindowHook =
-      profile.hookNtUserGetForegroundWindow;
-  hdd->EnableNtYieldExecutionHook = profile.hookNtYieldExecution;
-  hdd->EnableOutputDebugStringHook = profile.hookOutputDebugStringA;
+      profile.hook_nt_user_get_foreground_window;
+  hdd->EnableNtYieldExecutionHook = profile.hook_nt_yield_execution;
+  hdd->EnableOutputDebugStringHook = profile.hook_output_debug_string_a;
 
-  hdd->EnablePebBeingDebugged = profile.fixPebBeingDebugged;
-  hdd->EnablePebHeapFlags = profile.fixPebHeapFlags;
-  hdd->EnablePebNtGlobalFlag = profile.fixPebNtGlobalFlag;
-  hdd->EnablePebStartupInfo = profile.fixPebStartupInfo;
-  hdd->EnablePebOsBuildNumber = profile.fixPebOsBuildNumber;
-  hdd->EnablePreventThreadCreation = profile.preventThreadCreation;
+  hdd->EnablePebBeingDebugged = profile.fix_peb_being_debugged;
+  hdd->EnablePebHeapFlags = profile.fix_peb_heap_flags;
+  hdd->EnablePebNtGlobalFlag = profile.fix_peb_nt_global_flag;
+  hdd->EnablePebStartupInfo = profile.fix_peb_startup_info;
+  hdd->EnablePebOsBuildNumber = profile.fix_peb_os_build_number;
+  hdd->EnablePreventThreadCreation = profile.prevent_thread_creation;
 
   hdd->EnableMalwareRunPeUnpacker = FALSE;
   hdd->EnableProtectProcessId = FALSE;
@@ -193,8 +195,8 @@ bool WriteHookDllData(Session& session) {
     return false;
   }
   return WriteProcessMemory(
-             session.process, static_cast<uint8_t*>(session.remoteBase) + rva,
-             &session.hookData, sizeof(session.hookData), nullptr) != FALSE;
+             session.process, static_cast<uint8_t*>(session.remote_base) + rva,
+             &session.hook_data, sizeof(session.hook_data), nullptr) != FALSE;
 }
 
 bool LoadEmbeddedHookLibrary(std::vector<uint8_t>* image, std::string* error) {
@@ -228,9 +230,9 @@ bool LoadEmbeddedHookLibrary(std::vector<uint8_t>* image, std::string* error) {
     return false;
   }
 
-  const WORD expectedMachine =
+  const WORD kExpectedMachine =
       sizeof(void*) == 4 ? IMAGE_FILE_MACHINE_I386 : IMAGE_FILE_MACHINE_AMD64;
-  if (nt->FileHeader.Machine != expectedMachine) {
+  if (nt->FileHeader.Machine != kExpectedMachine) {
     *error = "embedded ScyllaHide hook library has the wrong architecture";
     return false;
   }
@@ -241,15 +243,15 @@ bool LoadEmbeddedHookLibrary(std::vector<uint8_t>* image, std::string* error) {
 }
 
 bool ApplyUserHooks(Session& session) {
-  if (session.hookData.isUserDllHooked) {
+  if (session.hook_data.isUserDllHooked) {
     return true;
   }
 
-  if (!ApplyHook(&session.hookData, session.process, session.image.data(),
-                 reinterpret_cast<DWORD_PTR>(session.remoteBase))) {
+  if (!ApplyHook(&session.hook_data, session.process, session.image.data(),
+                 reinterpret_cast<DWORD_PTR>(session.remote_base))) {
     return false;
   }
-  if (!session.hookData.isUserDllHooked) {
+  if (!session.hook_data.isUserDllHooked) {
     return false;
   }
   return WriteHookDllData(session);
@@ -300,54 +302,54 @@ bool Start(HANDLE process, DWORD processId, const Profile& profile,
   Profile effective = profile;
   bool userApiResolved = false;
   try {
-    userApiResolved = ReadNtApiInformation(&session->hookData);
+    userApiResolved = ReadNtApiInformation(&session->hook_data);
   } catch (...) {
     userApiResolved = false;
   }
   if (!userApiResolved) {
     // The core ntdll/kernel32 hooks still work.  Disable the optional user32
     // hooks instead of failing the whole injection.
-    effective.hookNtUserBlockInput = false;
-    effective.hookNtUserBuildHwndList = false;
-    effective.hookNtUserFindWindowEx = false;
-    effective.hookNtUserQueryWindow = false;
-    effective.hookNtUserGetForegroundWindow = false;
+    effective.hook_nt_user_block_input = false;
+    effective.hook_nt_user_build_hwnd_list = false;
+    effective.hook_nt_user_find_window_ex = false;
+    effective.hook_nt_user_query_window = false;
+    effective.hook_nt_user_get_foreground_window = false;
   }
-  FillHookDllData(&session->hookData, effective);
+  FillHookDllData(&session->hook_data, effective);
 
   DWORD pebFlags = 0;
-  if (effective.fixPebBeingDebugged) {
+  if (effective.fix_peb_being_debugged) {
     pebFlags |= PEB_PATCH_BeingDebugged;
   }
-  if (effective.fixPebHeapFlags) {
+  if (effective.fix_peb_heap_flags) {
     pebFlags |= PEB_PATCH_HeapFlags;
   }
-  if (effective.fixPebNtGlobalFlag) {
+  if (effective.fix_peb_nt_global_flag) {
     pebFlags |= PEB_PATCH_NtGlobalFlag;
   }
-  if (effective.fixPebStartupInfo) {
+  if (effective.fix_peb_startup_info) {
     pebFlags |= PEB_PATCH_ProcessParameters;
   }
-  if (effective.fixPebOsBuildNumber) {
+  if (effective.fix_peb_os_build_number) {
     pebFlags |= PEB_PATCH_OsBuildNumber;
   }
 
   if (pebFlags != 0) {
     ApplyPEBPatch(process, pebFlags);
   }
-  if (effective.fixPebOsBuildNumber) {
+  if (effective.fix_peb_os_build_number) {
     ApplyNtdllVersionPatch(process);
   }
 
-  session->remoteBase =
+  session->remote_base =
       MapModuleToProcess(process, session->image.data(), true);
-  if (session->remoteBase == nullptr) {
+  if (session->remote_base == nullptr) {
     *error = "mapping the ScyllaHide hook library failed";
     return false;
   }
 
-  if (!ApplyHook(&session->hookData, process, session->image.data(),
-                 reinterpret_cast<DWORD_PTR>(session->remoteBase))) {
+  if (!ApplyHook(&session->hook_data, process, session->image.data(),
+                 reinterpret_cast<DWORD_PTR>(session->remote_base))) {
     *error = "installing the ScyllaHide hooks failed";
     return false;
   }
@@ -357,8 +359,8 @@ bool Start(HANDLE process, DWORD processId, const Profile& profile,
     return false;
   }
 
-  LogF(ltGood, "ScyllaHide: hook library mapped at %p (pid %lu)",
-       session->remoteBase, processId);
+  LogF(kLogGood, "ScyllaHide: hook library mapped at %p (pid %lu)",
+       session->remote_base, processId);
   g_session = std::move(session);
   return true;
 }
@@ -367,7 +369,7 @@ void OnDllLoad(const std::wstring& fileName) {
   if (!g_session) {
     return;
   }
-  if (g_session->hookData.isUserDllHooked) {
+  if (g_session->hook_data.isUserDllHooked) {
     return;
   }
 
@@ -379,13 +381,13 @@ void OnDllLoad(const std::wstring& fileName) {
   }
 
   if (ApplyUserHooks(*g_session)) {
-    Log(ltGood, "ScyllaHide: user32 hooks applied");
+    Log(kLogGood, "ScyllaHide: user32 hooks applied");
   } else if (isUser32) {
-    Log(ltWarning, "ScyllaHide: applying user32 hooks failed");
+    Log(kLogWarning, "ScyllaHide: applying user32 hooks failed");
   } else {
     // win32u is mapped before user32 and the NtUser* stubs are not always
     // ready yet. The user32 event retries; only warn if that one fails.
-    Log(ltInfo,
+    Log(kLogInfo,
         "ScyllaHide: user32 hooks will be applied when user32.dll loads");
   }
 }
@@ -405,8 +407,8 @@ extern "C" int ScyllaHideMessageBoxA(HWND /*hWnd*/, LPCSTR lpText,
       icon == MB_ICONERROR || icon == MB_ICONHAND || icon == MB_ICONSTOP;
   const bool isWarning = icon == MB_ICONWARNING || icon == MB_ICONEXCLAMATION;
   const magicmida::LogMsgType type =
-      isError ? magicmida::ltFatal
-              : (isWarning ? magicmida::ltWarning : magicmida::ltInfo);
+      isError ? magicmida::kLogFatal
+              : (isWarning ? magicmida::kLogWarning : magicmida::kLogInfo);
   magicmida::LogF(type, "ScyllaHide: %s: %s",
                   lpCaption != nullptr ? lpCaption : "?",
                   lpText != nullptr ? lpText : "");

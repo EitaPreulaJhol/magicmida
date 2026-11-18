@@ -24,10 +24,10 @@ std::string SectionName(const IMAGE_SECTION_HEADER& header) {
 // --------------------------------------------------------------------------
 
 void PESection::Rename(std::string_view newName) {
-  const size_t count = std::min(newName.size(), sizeof(Header.Name));
-  std::memcpy(Header.Name, newName.data(), count);
-  if (count < sizeof(Header.Name)) {
-    std::memset(Header.Name + count, 0, sizeof(Header.Name) - count);
+  const size_t count = std::min(newName.size(), sizeof(header.Name));
+  std::memcpy(header.Name, newName.data(), count);
+  if (count < sizeof(header.Name)) {
+    std::memset(header.Name + count, 0, sizeof(header.Name) - count);
   }
 }
 
@@ -41,20 +41,20 @@ PEHeader::PEHeader(const uint8_t* data, size_t bufferSize) {
   }
 
   const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(data);
-  lfaNew_ = static_cast<uint32_t>(dos->e_lfanew);
-  if (static_cast<uint64_t>(lfaNew_) + sizeof(IMAGE_NT_HEADERS) > bufferSize) {
+  lfa_new_ = static_cast<uint32_t>(dos->e_lfanew);
+  if (static_cast<uint64_t>(lfa_new_) + sizeof(IMAGE_NT_HEADERS) > bufferSize) {
     throw std::runtime_error("PEHeader: truncated NT headers");
   }
 
-  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(data + lfaNew_);
+  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(data + lfa_new_);
   if (nt->Signature != IMAGE_NT_SIGNATURE) {
     throw std::runtime_error("PEHeader: signature mismatch");
   }
   ntHeaders = *nt;
-  dumpSize_ = ntHeaders.OptionalHeader.SizeOfImage;
+  dump_size_ = ntHeaders.OptionalHeader.SizeOfImage;
 
   const uint64_t sectionOffset =
-      static_cast<uint64_t>(lfaNew_) + sizeof(IMAGE_NT_HEADERS);
+      static_cast<uint64_t>(lfa_new_) + sizeof(IMAGE_NT_HEADERS);
   const uint64_t sectionBytes =
       static_cast<uint64_t>(ntHeaders.FileHeader.NumberOfSections) *
       sizeof(IMAGE_SECTION_HEADER);
@@ -69,7 +69,7 @@ PEHeader::PEHeader(const uint8_t* data, size_t bufferSize) {
     throw std::runtime_error("PEHeader: PE has no sections");
   }
   for (size_t i = 0; i < sections_.size(); ++i) {
-    sections_[i].Header = section[i];
+    sections_[i].header = section[i];
   }
 }
 
@@ -78,20 +78,20 @@ PESection* PEHeader::CreateSection(const std::string& name, uint32_t size) {
     throw std::runtime_error("CreateSection: PE has no sections");
   }
 
-  const IMAGE_SECTION_HEADER previous = sections_.back().Header;
+  const IMAGE_SECTION_HEADER previous = sections_.back().header;
   sections_.emplace_back();
   PESection& result = sections_.back();
 
-  std::memcpy(result.Header.Name, name.data(),
-              std::min(name.size(), sizeof(result.Header.Name)));
+  std::memcpy(result.header.Name, name.data(),
+              std::min(name.size(), sizeof(result.header.Name)));
 
-  result.Header.Misc.VirtualSize = size;
-  result.Header.VirtualAddress =
+  result.header.Misc.VirtualSize = size;
+  result.header.VirtualAddress =
       previous.VirtualAddress + previous.Misc.VirtualSize;
-  SectionAlign(result.Header.VirtualAddress);
-  result.Header.PointerToRawData = ntHeaders.OptionalHeader.SizeOfImage;
-  result.Header.SizeOfRawData = size;
-  result.Header.Characteristics =
+  SectionAlign(result.header.VirtualAddress);
+  result.header.PointerToRawData = ntHeaders.OptionalHeader.SizeOfImage;
+  result.header.SizeOfRawData = size;
+  result.header.Characteristics =
       IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_INITIALIZED_DATA;
 
   ntHeaders.OptionalHeader.SizeOfImage += size;
@@ -109,32 +109,32 @@ void PEHeader::DeleteSection(int index) {
 
   if (isLast) {
     size = ntHeaders.OptionalHeader.SizeOfImage -
-           sections_[index].Header.SizeOfRawData;
+           sections_[index].header.SizeOfRawData;
   } else {
     // Use the next section with raw data as the file-layout boundary;
     // zero-raw sections (.bss in regular PEs) usually have PointerToRawData 0.
     uint32_t nextRaw = 0;
     for (int i = index + 1; i < static_cast<int>(sections_.size()); ++i) {
-      if (sections_[i].Header.SizeOfRawData != 0) {
-        nextRaw = sections_[i].Header.PointerToRawData;
+      if (sections_[i].header.SizeOfRawData != 0) {
+        nextRaw = sections_[i].header.PointerToRawData;
         break;
       }
     }
-    const uint32_t currentRaw = sections_[index].Header.PointerToRawData;
+    const uint32_t currentRaw = sections_[index].header.PointerToRawData;
     size = nextRaw > currentRaw ? nextRaw - currentRaw
-                                : sections_[index].Header.SizeOfRawData;
+                                : sections_[index].header.SizeOfRawData;
   }
 
   for (int i = static_cast<int>(sections_.size()) - 1; i >= index + 1; --i) {
-    if (sections_[i].Header.SizeOfRawData == 0) {
+    if (sections_[i].header.SizeOfRawData == 0) {
       continue;  // Keep the conventional zero raw pointer.
     }
-    sections_[i].Header.PointerToRawData -= size;
+    sections_[i].header.PointerToRawData -= size;
   }
 
-  sections_[index - 1].Header.Misc.VirtualSize +=
-      sections_[index].Header.Misc.VirtualSize;
-  SectionAlign(sections_[index - 1].Header.Misc.VirtualSize);
+  sections_[index - 1].header.Misc.VirtualSize +=
+      sections_[index].header.Misc.VirtualSize;
+  SectionAlign(sections_[index - 1].header.Misc.VirtualSize);
 
   if (!isLast) {
     std::move(sections_.begin() + index + 1, sections_.end(),
@@ -147,7 +147,7 @@ void PEHeader::DeleteSection(int index) {
 
 PESection* PEHeader::GetSectionByVA(uint32_t va) {
   for (PESection& section : sections_) {
-    if (section.Header.VirtualAddress + section.Header.Misc.VirtualSize > va) {
+    if (section.header.VirtualAddress + section.header.Misc.VirtualSize > va) {
       return &section;
     }
   }
@@ -156,27 +156,27 @@ PESection* PEHeader::GetSectionByVA(uint32_t va) {
 
 void PEHeader::Sanitize() {
   for (PESection& section : sections_) {
-    section.Header.PointerToRawData = section.Header.VirtualAddress;
-    section.Header.SizeOfRawData = section.Header.Misc.VirtualSize;
+    section.header.PointerToRawData = section.header.VirtualAddress;
+    section.header.SizeOfRawData = section.header.Misc.VirtualSize;
   }
 
   if (!sections_.empty()) {
     ntHeaders.OptionalHeader.SizeOfHeaders =
-        sections_[0].Header.PointerToRawData;
+        sections_[0].header.PointerToRawData;
 #if !defined(_WIN64)
     // 32-bit packers sometimes merge .text/.data and clear WRITE from the
     // header; keep the old workaround there. On x64 a forced W+X .text is a
     // dump fingerprint, so preserve the original characteristics.
-    sections_[0].Header.Characteristics |= IMAGE_SCN_MEM_WRITE;
+    sections_[0].header.Characteristics |= IMAGE_SCN_MEM_WRITE;
 #endif
   }
 }
 
 void PEHeader::SaveToStream(Stream& stream) {
-  stream.Seek(lfaNew_, Stream::Origin::Begin);
+  stream.Seek(lfa_new_, Stream::Origin::kBegin);
   stream.Write(&ntHeaders, sizeof(ntHeaders));
   for (const PESection& section : sections_) {
-    stream.Write(&section.Header, sizeof(IMAGE_SECTION_HEADER));
+    stream.Write(&section.header, sizeof(IMAGE_SECTION_HEADER));
   }
 
   // Zero out some leftovers that may be in the header.
@@ -188,13 +188,13 @@ uint32_t PEHeader::TrimHugeSections(uint8_t* buf, uint32_t& iatRawAddr) {
   uint32_t result = 0;
 
   for (uint32_t i = 0; i < ntHeaders.FileHeader.NumberOfSections; ++i) {
-    const uint32_t sectionStart = sections_[i].Header.PointerToRawData;
+    const uint32_t sectionStart = sections_[i].header.PointerToRawData;
     // Do not trust the header blindly: the raw range must lie inside the
     // dumped image.
     const uint32_t available =
-        sectionStart < dumpSize_ ? dumpSize_ - sectionStart : 0;
+        sectionStart < dump_size_ ? dump_size_ - sectionStart : 0;
     const uint32_t scanSize = std::min<uint32_t>(
-        static_cast<uint32_t>(sections_[i].Header.SizeOfRawData), available);
+        static_cast<uint32_t>(sections_[i].header.SizeOfRawData), available);
     int zeroStart = -1;
 
     for (int j = static_cast<int>(scanSize / 4) - 1; j >= 0; --j) {
@@ -210,33 +210,34 @@ uint32_t PEHeader::TrimHugeSections(uint8_t* buf, uint32_t& iatRawAddr) {
     // file offset == RVA is pretty convenient, so we only trim sections that
     // were obviously bloated up.
     if (zeroStart != -1 &&
-        sections_[i].Header.SizeOfRawData - static_cast<uint32_t>(zeroStart) >
+        sections_[i].header.SizeOfRawData - static_cast<uint32_t>(zeroStart) >
             1u * 1024 * 1024) {
-      uint32_t oldSectionSize = sections_[i].Header.SizeOfRawData;
+      uint32_t oldSectionSize = sections_[i].header.SizeOfRawData;
       SectionAlign(oldSectionSize);  // Sanitize() aligned the actual size.
-      if (static_cast<uint64_t>(sectionStart) + oldSectionSize > dumpSize_) {
+      if (static_cast<uint64_t>(sectionStart) + oldSectionSize > dump_size_) {
         continue;  // Malformed section; leave it untouched.
       }
 
       uint32_t newSectionSize = static_cast<uint32_t>(zeroStart);
       FileAlign(newSectionSize);
-      LogF(ltInfo, "Reducing size of section [%s]: %X -> %X",
-           SectionName(sections_[i].Header).c_str(), oldSectionSize,
+      LogF(kLogInfo, "Reducing size of section [%s]: %X -> %X",
+           SectionName(sections_[i].header).c_str(), oldSectionSize,
            newSectionSize);
 
       const uint32_t delta = oldSectionSize - newSectionSize;
       result += delta;
-      sections_[i].Header.SizeOfRawData = newSectionSize;
+      sections_[i].header.SizeOfRawData = newSectionSize;
 
       if (i < sections_.size() - 1) {
-        const uint32_t nextRaw = sections_[i + 1].Header.PointerToRawData;
-        const uint32_t moveSize = nextRaw < dumpSize_ ? dumpSize_ - nextRaw : 0;
+        const uint32_t nextRaw = sections_[i + 1].header.PointerToRawData;
+        const uint32_t moveSize =
+            nextRaw < dump_size_ ? dump_size_ - nextRaw : 0;
         if (nextRaw >= sectionStart + newSectionSize) {
           std::memmove(buf + sectionStart + newSectionSize, buf + nextRaw,
                        moveSize);
         }
         for (size_t j = i + 1; j < sections_.size(); ++j) {
-          sections_[j].Header.PointerToRawData -= delta;
+          sections_[j].header.PointerToRawData -= delta;
         }
       }
 
@@ -255,12 +256,12 @@ void PEHeader::AddSectionToArray() {
 
 uint32_t PEHeader::ConvertOffsetToRVAVector(uintptr_t offset) const {
   for (const PESection& section : sections_) {
-    if (section.Header.PointerToRawData <= offset &&
-        static_cast<uintptr_t>(section.Header.PointerToRawData) +
-                section.Header.SizeOfRawData >
+    if (section.header.PointerToRawData <= offset &&
+        static_cast<uintptr_t>(section.header.PointerToRawData) +
+                section.header.SizeOfRawData >
             offset) {
-      return static_cast<uint32_t>(offset - section.Header.PointerToRawData) +
-             section.Header.VirtualAddress;
+      return static_cast<uint32_t>(offset - section.header.PointerToRawData) +
+             section.header.VirtualAddress;
     }
   }
   return 0;

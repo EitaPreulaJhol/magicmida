@@ -15,48 +15,39 @@
 
 namespace magicmida {
 
-constexpr size_t MAX_IAT_SIZE = 5120 * sizeof(void*);
+constexpr size_t kMaxIatSize = 5120 * sizeof(void*);
 
 using ExportTable = std::unordered_map<uintptr_t, std::string>;
 
 struct Forward {
-  std::string Key;
-  uintptr_t Value = 0;
+  std::string key;
+  uintptr_t value = 0;
 };
 
 struct RemoteModule {
-  uintptr_t Base = 0;
-  uintptr_t EndOff = 0;
-  std::string Name;
-  ExportTable ExportTbl;
-  std::vector<Forward> Forwards;
+  uintptr_t base = 0;
+  uintptr_t end_off = 0;
+  std::string name;
+  ExportTable export_tbl;
+  std::vector<Forward> forwards;
 };
 
 struct ForwardOrigin {
-  RemoteModule* SourceModule = nullptr;
-  uintptr_t SourceAddress = 0;
+  RemoteModule* source_module = nullptr;
+  uintptr_t source_address = 0;
 };
 
 using ForwardMap = std::unordered_map<uintptr_t, std::vector<ForwardOrigin>>;
 
-class ImportThunk {
- public:
-  explicit ImportThunk(RemoteModule* module);
-
-  RemoteModule* Module = nullptr;
-  std::string Name;
-  std::vector<uintptr_t*> Addresses;
-};
-
 struct OriginalImport {
-  std::string DllName;
-  std::string FuncName;
+  std::string dll_name;
+  std::string func_name;
 };
 
 class Dumper {
  public:
   Dumper(const PROCESS_INFORMATION& process, const std::wstring& originalFile,
-         uintptr_t imageBase, uintptr_t oep);
+         uintptr_t image_base, uintptr_t oep);
   ~Dumper();
 
   Dumper(const Dumper&) = delete;
@@ -64,7 +55,7 @@ class Dumper {
 
   std::unique_ptr<PEHeader> Process();
   void DumpToFile(const std::wstring& fileName, PEHeader& pe,
-                  bool isDll = false);
+                  bool is_dll = false);
 
   uint32_t DetermineIATSize(const uint8_t* iat);
   bool IsAPIAddress(uintptr_t address);
@@ -94,30 +85,30 @@ class Dumper {
 
   PROCESS_INFORMATION process_{};
   uintptr_t oep_ = 0;
-  uintptr_t imageBase_ = 0;
+  uintptr_t image_base_ = 0;
   ForwardMap forwards_;
-  std::vector<std::unique_ptr<RemoteModule>> allModules_;
-  bool snapshotTaken_ = false;
-  std::vector<uint8_t> headerSnapshot_;
-  std::vector<uint8_t> iatImage_;
-  uint32_t iatImageSize_ = 0;
-  std::vector<OriginalImport> originalImports_;
+  std::vector<std::unique_ptr<RemoteModule>> all_modules_;
+  bool snapshot_taken_ = false;
+  std::vector<uint8_t> header_snapshot_;
+  std::vector<uint8_t> iat_image_;
+  uint32_t iat_image_size_ = 0;
+  std::vector<OriginalImport> original_imports_;
 
 #if !defined(_WIN64)
-  std::wstring usrPath_;
-  uintptr_t hUsr_ = 0;
+  std::wstring usr_module_path_;
+  uintptr_t usr_module_ = 0;
 #endif
 };
 
 class DumperDotnet {
  public:
-  DumperDotnet(const PROCESS_INFORMATION& process, uintptr_t imageBase);
+  DumperDotnet(const PROCESS_INFORMATION& process, uintptr_t image_base);
 
   void DumpToFile(const std::wstring& fileName);
 
  private:
   PROCESS_INFORMATION process_{};
-  uintptr_t imageBase_ = 0;
+  uintptr_t image_base_ = 0;
 };
 
 }  // namespace magicmida

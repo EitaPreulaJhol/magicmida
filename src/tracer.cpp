@@ -9,20 +9,20 @@ namespace magicmida {
 
 Tracer::Tracer(DWORD processId, DWORD threadId, HANDLE threadHandle,
                Predicate predicate)
-    : processId_(processId),
-      threadId_(threadId),
-      threadHandle_(threadHandle),
+    : process_id_(processId),
+      thread_id_(threadId),
+      thread_handle_(threadHandle),
       predicate_(std::move(predicate)) {}
 
 void Tracer::Trace(uintptr_t address, uint32_t limit) {
   counter_ = 0;
   limit_ = limit;
-  limitReached_ = false;
-  startAddress_ = address;
+  limit_reached_ = false;
+  start_address_ = address;
 
   CONTEXT context{};
   context.ContextFlags = CONTEXT_CONTROL;
-  if (!GetThreadContext(threadHandle_, &context)) {
+  if (!GetThreadContext(thread_handle_, &context)) {
     throw std::runtime_error(
         Format("GetThreadContext failed (error %lu)", GetLastError()));
   }
@@ -33,12 +33,12 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
   context.Eip = address;
 #endif
   context.EFlags |= 0x100;  // Trap
-  if (!SetThreadContext(threadHandle_, &context)) {
+  if (!SetThreadContext(thread_handle_, &context)) {
     throw std::runtime_error(
         Format("SetThreadContext failed (error %lu)", GetLastError()));
   }
 
-  if (!ContinueDebugEvent(processId_, threadId_, DBG_CONTINUE)) {
+  if (!ContinueDebugEvent(process_id_, thread_id_, DBG_CONTINUE)) {
     throw std::runtime_error(
         Format("ContinueDebugEvent failed during tracing (error %lu)",
                GetLastError()));
@@ -60,8 +60,8 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
           Format("WaitForDebugEvent failed during tracing (error %lu)", error));
     }
 
-    if (debugEvent.dwThreadId != threadId_) {
-      LogF(ltInfo, "Suspending spurious thread %lu", debugEvent.dwThreadId);
+    if (debugEvent.dwThreadId != thread_id_) {
+      LogF(kLogInfo, "Suspending spurious thread %lu", debugEvent.dwThreadId);
       HANDLE thread =
           OpenThread(THREAD_SUSPEND_RESUME, FALSE,
                      debugEvent.dwThreadId);  // 2 == THREAD_SUSPEND_RESUME
@@ -108,14 +108,14 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
 DWORD Tracer::OnSingleStep(const DEBUG_EVENT& /*debugEvent*/) {
   ++counter_;
   if (limit_ != 0 && counter_ > limit_) {
-    limitReached_ = true;
-    Log(ltInfo, "Giving up trace due to instruction limit");
+    limit_reached_ = true;
+    Log(kLogInfo, "Giving up trace due to instruction limit");
     return DBG_CONTROL_BREAK;
   }
 
   CONTEXT context{};
   context.ContextFlags = CONTEXT_CONTROL;
-  if (!GetThreadContext(threadHandle_, &context)) {
+  if (!GetThreadContext(thread_handle_, &context)) {
     throw std::runtime_error(
         Format("GetThreadContext failed (error %lu)", GetLastError()));
   }
@@ -126,7 +126,7 @@ DWORD Tracer::OnSingleStep(const DEBUG_EVENT& /*debugEvent*/) {
   }
 
   context.EFlags |= 0x100;
-  if (!SetThreadContext(threadHandle_, &context)) {
+  if (!SetThreadContext(thread_handle_, &context)) {
     throw std::runtime_error(
         Format("SetThreadContext failed (error %lu)", GetLastError()));
   }
