@@ -281,11 +281,19 @@ src/
   scyllahide.*        embedded ScyllaHide loading/mapping/deferred hooking
 vendor/beaengine/     prebuilt BeaEngine objects (from the original repo)
 vendor/scyllahide/    pinned ScyllaHide subset + local patches
-docs/                 demo GIF (and the ignored source MP4)
+docs/                 style policy and demo GIF (and the ignored source MP4)
 cmake/                toolchain files, resource and worker-embedding helpers
 resources/            manifest and resource script
-tools/                helper scripts (ApiSet table generator)
+tools/                helper scripts (ApiSet table generator, exception check)
 ```
+
+## Style
+
+The C++ code follows the Google C++ Style Guide with the deviations recorded
+in [`docs/style.md`](docs/style.md). `clang-format` and `cpplint` run in CI.
+The exception-based error handling inherited from the Delphi port is frozen
+by `tools/check_exceptions.py`; new `throw`/`try`/`catch` sites are rejected
+until the migration to status codes is completed.
 
 ## Credits
 

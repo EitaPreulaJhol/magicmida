@@ -29,3 +29,12 @@ jobs:
 
       - name: Run cpplint
         run: cpplint --recursive src
+
+  exceptions:
+    name: exception baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check exception baseline
+        run: python3 tools/check_exceptions.py

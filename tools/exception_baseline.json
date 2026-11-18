@@ -1,0 +1,77 @@
+{
+  "src/common.cpp": {
+    "catch": 0,
+    "throw": 1,
+    "try": 0
+  },
+  "src/debugger_core.cpp": {
+    "catch": 2,
+    "throw": 15,
+    "try": 2
+  },
+  "src/disasm.cpp": {
+    "catch": 0,
+    "throw": 1,
+    "try": 0
+  },
+  "src/dumper.cpp": {
+    "catch": 0,
+    "throw": 12,
+    "try": 0
+  },
+  "src/gui_main.cpp": {
+    "catch": 11,
+    "throw": 2,
+    "try": 10
+  },
+  "src/patcher.cpp": {
+    "catch": 0,
+    "throw": 22,
+    "try": 0
+  },
+  "src/pe_info.cpp": {
+    "catch": 0,
+    "throw": 6,
+    "try": 0
+  },
+  "src/pe_report.cpp": {
+    "catch": 1,
+    "throw": 8,
+    "try": 1
+  },
+  "src/reloc_fix.cpp": {
+    "catch": 0,
+    "throw": 1,
+    "try": 0
+  },
+  "src/scyllahide.cpp": {
+    "catch": 1,
+    "throw": 0,
+    "try": 1
+  },
+  "src/stream.cpp": {
+    "catch": 0,
+    "throw": 7,
+    "try": 0
+  },
+  "src/themida32.cpp": {
+    "catch": 1,
+    "throw": 21,
+    "try": 1
+  },
+  "src/themida64.cpp": {
+    "catch": 1,
+    "throw": 12,
+    "try": 1
+  },
+  "src/themida_common.cpp": {
+    "catch": 0,
+    "throw": 11,
+    "try": 0
+  },
+  "src/tracer.cpp": {
+    "catch": 0,
+    "throw": 8,
+    "try": 0
+  }
+}

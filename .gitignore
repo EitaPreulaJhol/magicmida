@@ -36,3 +36,7 @@ Thumbs.db
 
 # Demo source video (the README uses docs/running.gif)
 docs/*.mp4
+
+# Python bytecode
+__pycache__/
+*.py[cod]
