@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // Minimal TStream replacements (TFileStream / TMemoryStream).
+// SPDX-License-Identifier: GPL-3.0-only
 #include "stream.h"
 
 #include <algorithm>

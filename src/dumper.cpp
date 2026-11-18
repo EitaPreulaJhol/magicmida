@@ -1,8 +1,7 @@
 // Magicmida - C++ port
 // Import reconstruction and process dumping (ported from Dumper.pas).
+// SPDX-License-Identifier: GPL-3.0-only
 #include "dumper.h"
-
-#include "onecore_uap.h"
 
 #include <tlhelp32.h>
 
@@ -14,6 +13,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "onecore_uap.h"
 
 namespace magicmida {
 namespace {
@@ -52,7 +53,7 @@ constexpr uint16_t kExpectedOptionalMagic = sizeof(void*) == 8 ? 0x20B : 0x10B;
 // Rejects headers that were zeroed/truncated by an anti-dump. A plausible
 // header must have a section table that fits in the snapshot and sections
 // that fit in SizeOfImage.
-bool IsPlausiblePEHeader(const std::vector<uint8_t>& data) {
+bool IsPlausiblePeHeader(const std::vector<uint8_t>& data) {
   if (data.size() < 0x1000) {
     return false;
   }
@@ -162,8 +163,8 @@ void LogHeaderDiff(const std::vector<uint8_t>& live,
   }
   if (live_nt->OptionalHeader.ImageBase != snap_nt->OptionalHeader.ImageBase) {
     LogF(kLogInfo, "PE header: ImageBase %llX -> %llX.",
-         static_cast<unsigned long long>(snap_nt->OptionalHeader.ImageBase),
-         static_cast<unsigned long long>(live_nt->OptionalHeader.ImageBase));
+         static_cast<uint64_t>(snap_nt->OptionalHeader.ImageBase),
+         static_cast<uint64_t>(live_nt->OptionalHeader.ImageBase));
   }
   if (live_nt->OptionalHeader.DllCharacteristics !=
       snap_nt->OptionalHeader.DllCharacteristics) {
@@ -220,9 +221,9 @@ Dumper::Dumper(const PROCESS_INFORMATION& process,
   // modify it. Process() falls back to this snapshot when the live header
   // looks corrupted.
   header_snapshot_.resize(0x1000);
-  if (!RPM(image_base_, header_snapshot_.data(), header_snapshot_.size())) {
+  if (!Rpm(image_base_, header_snapshot_.data(), header_snapshot_.size())) {
     MakeMemoryReadable(image_base_, header_snapshot_.size());
-    if (!RPM(image_base_, header_snapshot_.data(), header_snapshot_.size())) {
+    if (!Rpm(image_base_, header_snapshot_.data(), header_snapshot_.size())) {
       header_snapshot_.clear();
       Log(kLogWarning, "Could not capture the PE header before tracing.");
     } else {
@@ -240,17 +241,17 @@ Dumper::~Dumper() {
 #endif
 }
 
-void Dumper::DumpToFile(const std::wstring& file_name, PEHeader& pe,
+void Dumper::DumpToFile(const std::wstring& file_name, PeHeader& pe,
                         bool is_dll) {
   FileStream file(file_name, FileStream::Mode::kCreate);
 
   uint32_t size = pe.DumpSize();
   std::vector<uint8_t> buffer(size);
   MakeMemoryReadable(image_base_, size);
-  if (!RPM(image_base_, buffer.data(), size)) {
+  if (!Rpm(image_base_, buffer.data(), size)) {
     throw std::runtime_error(
         Format("DumpToFile RPM failed (base: %llX, size: %X)",
-               static_cast<unsigned long long>(image_base_), size));
+               static_cast<uint64_t>(image_base_), size));
   }
 
   uint32_t iat_raw_offset = static_cast<uint32_t>(iat_ - image_base_);
@@ -261,7 +262,7 @@ void Dumper::DumpToFile(const std::wstring& file_name, PEHeader& pe,
 
   const size_t number_of_sections = pe.nt_headers().FileHeader.NumberOfSections;
   for (size_t i = number_of_sections; i < pe.Sections().size(); ++i) {
-    const PESection& section = pe.Sections()[i];
+    const PeSection& section = pe.Sections()[i];
     const uint32_t raw_size = section.header.SizeOfRawData;
     const size_t available = std::min<size_t>(section.data.size(), raw_size);
     if (available > 0) {
@@ -280,7 +281,7 @@ void Dumper::DumpToFile(const std::wstring& file_name, PEHeader& pe,
 
   if (is_dll) {
     pe.nt_headers().FileHeader.Characteristics |= IMAGE_FILE_DLL;
-    SwitchSxSManifestType(file, pe, 1, 2);  // Switch back
+    SwitchSxsManifestType(file, pe, 1, 2);  // Switch back
   }
 
   if ((pe.nt_headers().OptionalHeader.DllCharacteristics & 0x40) != 0) {
@@ -297,9 +298,8 @@ void Dumper::DumpToFile(const std::wstring& file_name, PEHeader& pe,
     LogF(kLogWarning,
          "Header image base %llX does not match the load address %llX; "
          "updating the dump header.",
-         static_cast<unsigned long long>(
-             pe.nt_headers().OptionalHeader.ImageBase),
-         static_cast<unsigned long long>(image_base_));
+         static_cast<uint64_t>(pe.nt_headers().OptionalHeader.ImageBase),
+         static_cast<uint64_t>(image_base_));
     pe.nt_headers().OptionalHeader.ImageBase =
         static_cast<decltype(pe.nt_headers().OptionalHeader.ImageBase)>(
             image_base_);
@@ -311,7 +311,7 @@ void Dumper::DumpToFile(const std::wstring& file_name, PEHeader& pe,
   file.Write(iat_image_.data(), iat_image_size_);
 }
 
-uint32_t Dumper::DetermineIATSize(const uint8_t* iat) {
+uint32_t Dumper::DetermineIatSize(const uint8_t* iat) {
   uint32_t last_valid_offset = 0;
   uint32_t i = 0;
   uintptr_t value = 0;
@@ -319,7 +319,7 @@ uint32_t Dumper::DetermineIATSize(const uint8_t* iat) {
   while (i < kMaxIatSize &&
          (last_valid_offset == 0 || i < last_valid_offset + 0x100)) {
     std::memcpy(&value, iat + i, sizeof(value));
-    if (IsAPIAddress(value)) {
+    if (IsApiAddress(value)) {
       last_valid_offset = i;
     }
     i += static_cast<uint32_t>(sizeof(void*));
@@ -347,7 +347,7 @@ struct ResolutionCandidate {
   RemoteModule* module = nullptr;
 };
 
-struct IATSlot {
+struct IatSlot {
   std::vector<ResolutionCandidate> candidates;
   int chosen_candidate = -1;
   bool is_zero = false;
@@ -361,14 +361,14 @@ struct ModuleVote {
 
 }  // namespace
 
-std::unique_ptr<PEHeader> Dumper::Process() {
+std::unique_ptr<PeHeader> Dumper::Process() {
   if (iat_ == 0) {
     throw std::runtime_error("Must set IAT before calling Process()");
   }
 
   // Read header from memory.
   std::vector<uint8_t> section_data(0x1000);
-  if (!RPM(image_base_, section_data.data(), section_data.size())) {
+  if (!Rpm(image_base_, section_data.data(), section_data.size())) {
     throw std::runtime_error("Dumper::Process: reading image header failed");
   }
 
@@ -378,8 +378,8 @@ std::unique_ptr<PEHeader> Dumper::Process() {
                   section_data.size()) != 0) {
     Log(kLogWarning, "The PE header changed between OEP and dump.");
     LogHeaderDiff(section_data, header_snapshot_);
-    const bool live_plausible = IsPlausiblePEHeader(section_data);
-    const bool snapshot_plausible = IsPlausiblePEHeader(header_snapshot_);
+    const bool live_plausible = IsPlausiblePeHeader(section_data);
+    const bool snapshot_plausible = IsPlausiblePeHeader(header_snapshot_);
     if (!live_plausible && snapshot_plausible) {
       Log(kLogWarning,
           "The live PE header looks corrupted; using the pre-trace snapshot.");
@@ -392,15 +392,15 @@ std::unique_ptr<PEHeader> Dumper::Process() {
   }
 
   auto pe =
-      std::make_unique<PEHeader>(section_data.data(), section_data.size());
+      std::make_unique<PeHeader>(section_data.data(), section_data.size());
   pe->Sanitize();
 
   std::vector<uint8_t> iat(kMaxIatSize);
-  if (!RPM(iat_, iat.data(), iat.size())) {
+  if (!Rpm(iat_, iat.data(), iat.size())) {
     throw std::runtime_error("Dumper::Process: reading IAT failed");
   }
 
-  const uint32_t iat_size = DetermineIATSize(iat.data());
+  const uint32_t iat_size = DetermineIatSize(iat.data());
   LogF(kLogInfo, "Determined IAT size: %X", iat_size);
 
   auto& iat_directory =
@@ -421,7 +421,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
   }
 
   const int slot_count = static_cast<int>(iat_size / sizeof(uintptr_t));
-  std::vector<IATSlot> slots(static_cast<size_t>(slot_count));
+  std::vector<IatSlot> slots(static_cast<size_t>(slot_count));
 
   auto read_slot = [&](int index) {
     uintptr_t value = 0;
@@ -439,7 +439,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
   // PASS 1: Collect all candidates for every IAT slot.
   // =======================================================================
   for (int i = 0; i < slot_count; ++i) {
-    IATSlot& slot = slots[static_cast<size_t>(i)];
+    IatSlot& slot = slots[static_cast<size_t>(i)];
     slot.is_zero = read_slot(i) == 0;
 
     if (slot.is_zero) {
@@ -475,9 +475,9 @@ std::unique_ptr<PEHeader> Dumper::Process() {
 
     if (slot.candidates.empty()) {
       LogF(kLogInfo, "IAT slot %08llX -> %08llX unresolvable",
-           static_cast<unsigned long long>(iat_ + static_cast<uintptr_t>(i) *
-                                                      sizeof(uintptr_t)),
-           static_cast<unsigned long long>(slot_value));
+           static_cast<uint64_t>(iat_ +
+                                 static_cast<uintptr_t>(i) * sizeof(uintptr_t)),
+           static_cast<uint64_t>(slot_value));
     }
   }
 
@@ -540,7 +540,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
 
     // Pin each slot to the winning module's candidate.
     for (int j = group_start; j <= group_end; ++j) {
-      IATSlot& slot = slots[static_cast<size_t>(j)];
+      IatSlot& slot = slots[static_cast<size_t>(j)];
       for (size_t k = 0; k < slot.candidates.size(); ++k) {
         if (slot.candidates[k].module->name == winner_name) {
           slot.chosen_candidate = static_cast<int>(k);
@@ -555,7 +555,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     std::string api_set_name;
     if (allow_api_sets) {
       for (int j = group_start; j <= group_end; ++j) {
-        const IATSlot& slot = slots[static_cast<size_t>(j)];
+        const IatSlot& slot = slots[static_cast<size_t>(j)];
         if (slot.chosen_candidate < 0 && slot.candidates.empty()) {
           continue;
         }
@@ -575,9 +575,9 @@ std::unique_ptr<PEHeader> Dumper::Process() {
         }
 
         if (j == group_start) {
-          api_set_name = GetOneCoreUAPModuleByAPI(func_name);
+          api_set_name = GetOneCoreUapModuleByApi(func_name);
         } else if (!api_set_name.empty() &&
-                   GetOneCoreUAPModuleByAPI(func_name) != api_set_name) {
+                   GetOneCoreUapModuleByApi(func_name) != api_set_name) {
           api_set_name.clear();
         }
       }
@@ -588,7 +588,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     // happened between kernel32 and kernelbase.
     if (!api_set_name.empty() && winner_module != nullptr) {
       for (int j = group_start; j <= group_end; ++j) {
-        IATSlot& slot = slots[static_cast<size_t>(j)];
+        IatSlot& slot = slots[static_cast<size_t>(j)];
         if (slot.chosen_candidate >= 0 || slot.candidates.empty()) {
           continue;
         }
@@ -601,8 +601,8 @@ std::unique_ptr<PEHeader> Dumper::Process() {
             slot.candidates[0].address = export_entry.first;
             slot.chosen_candidate = 0;
             LogF(kLogInfo, "IAT slot %08llX: remapped apiset member %s",
-                 static_cast<unsigned long long>(
-                     iat_ + static_cast<uintptr_t>(j) * sizeof(uintptr_t)),
+                 static_cast<uint64_t>(iat_ + static_cast<uintptr_t>(j) *
+                                                  sizeof(uintptr_t)),
                  func_name.c_str());
             break;
           }
@@ -614,13 +614,13 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     // Within a zero-free group we stay in one thunk for the winner module.
     ImportThunk* thunk = nullptr;
     for (int j = group_start; j <= group_end; ++j) {
-      IATSlot& slot = slots[static_cast<size_t>(j)];
+      IatSlot& slot = slots[static_cast<size_t>(j)];
       if (slot.chosen_candidate < 0) {
         LogF(kLogFatal,
              "IAT slot %08llX  has no candidate for winning module %s (bogus "
              "entry)",
-             static_cast<unsigned long long>(iat_ + static_cast<uintptr_t>(j) *
-                                                        sizeof(uintptr_t)),
+             static_cast<uint64_t>(iat_ + static_cast<uintptr_t>(j) *
+                                              sizeof(uintptr_t)),
              winner_name.c_str());
         continue;
       }
@@ -653,7 +653,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
     i = group_end + 1;
   }
 
-  PESection* import_section = pe->CreateSection(".import", 0x1000);
+  PeSection* import_section = pe->CreateSection(".import", 0x1000);
   std::vector<uint8_t> import_data(import_section->header.SizeOfRawData, 0);
 
   const size_t descriptor_count =
@@ -679,7 +679,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
         reinterpret_cast<uintptr_t>(thunk.addresses.front()) -
         reinterpret_cast<uintptr_t>(iat.data()));
     descriptors[thunk_index].Name =
-        pe->ConvertOffsetToRVAVector(import_section->header.PointerToRawData +
+        pe->ConvertOffsetToRvaVector(import_section->header.PointerToRawData +
                                      static_cast<uint32_t>(strings_offset));
 
     const std::string& module_name = thunk.name;
@@ -711,7 +711,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
       const size_t hint_offset = strings_offset;
       strings_offset += 2;
       *thunk.addresses[j] = static_cast<uintptr_t>(
-          pe->ConvertOffsetToRVAVector(import_section->header.PointerToRawData +
+          pe->ConvertOffsetToRvaVector(import_section->header.PointerToRawData +
                                        static_cast<uint32_t>(hint_offset)));
 
       ensure_import_capacity(strings_offset + func_name.size() + 1);
@@ -744,7 +744,7 @@ std::unique_ptr<PEHeader> Dumper::Process() {
 
 void Dumper::GatherModuleExportsFromRemoteProcess(RemoteModule& module) {
   std::vector<uint8_t> head(0x1000);
-  if (!RPM(module.base, head.data(), head.size())) {
+  if (!Rpm(module.base, head.data(), head.size())) {
     return;
   }
 
@@ -760,7 +760,7 @@ void Dumper::GatherModuleExportsFromRemoteProcess(RemoteModule& module) {
   }
 
   std::vector<uint8_t> export_data(export_directory.Size);
-  if (!RPM(module.base + export_directory.VirtualAddress, export_data.data(),
+  if (!Rpm(module.base + export_directory.VirtualAddress, export_data.data(),
            export_data.size())) {
     return;
   }
@@ -909,7 +909,7 @@ RemoteModule* Dumper::GetRemoteModule(const std::string& name) {
   return nullptr;
 }
 
-bool Dumper::IsAPIAddress(uintptr_t address) {
+bool Dumper::IsApiAddress(uintptr_t address) {
   if (!snapshot_taken_) {
     TakeModuleSnapshot();
   }
@@ -962,7 +962,7 @@ void Dumper::TakeModuleSnapshot() {
   }
 }
 
-bool Dumper::RPM(uintptr_t address, void* buf, size_t size) {
+bool Dumper::Rpm(uintptr_t address, void* buf, size_t size) {
   const BOOL result = ReadProcessMemory(
       process_.hProcess, reinterpret_cast<void*>(address), buf, size, nullptr);
   if (!result) {
@@ -993,7 +993,7 @@ void Dumper::MakeMemoryReadable(uintptr_t base, uintptr_t size) {
   }
 }
 
-void Dumper::SwitchSxSManifestType(Stream& stream, PEHeader& pe,
+void Dumper::SwitchSxsManifestType(Stream& stream, PeHeader& pe,
                                    int switch_from, int switch_to) {
   const auto& resource_directory =
       pe.nt_headers()
@@ -1002,8 +1002,8 @@ void Dumper::SwitchSxSManifestType(Stream& stream, PEHeader& pe,
     return;
   }
 
-  PESection* resource_section =
-      pe.GetSectionByVA(resource_directory.VirtualAddress);
+  PeSection* resource_section =
+      pe.GetSectionByVa(resource_directory.VirtualAddress);
   if (resource_section == nullptr) {
     return;
   }
@@ -1087,7 +1087,7 @@ std::vector<OriginalImport> Dumper::GetOriginalImports(
   }
   file.Read(header_buffer.data(), to_read);
 
-  PEHeader file_pe(header_buffer.data(), to_read);
+  PeHeader file_pe(header_buffer.data(), to_read);
   const IMAGE_DATA_DIRECTORY import_directory =
       file_pe.nt_headers()
           .OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
@@ -1095,7 +1095,7 @@ std::vector<OriginalImport> Dumper::GetOriginalImports(
     return result;
   }
 
-  PESection* section = file_pe.GetSectionByVA(import_directory.VirtualAddress);
+  PeSection* section = file_pe.GetSectionByVa(import_directory.VirtualAddress);
   if (section == nullptr || section->header.SizeOfRawData == 0) {
     return result;
   }
@@ -1213,12 +1213,12 @@ void DumperDotnet::DumpToFile(const std::wstring& file_name) {
     throw std::runtime_error("DumpToFile header RPM failed");
   }
 
-  PEHeader pe(header, sizeof(header));
+  PeHeader pe(header, sizeof(header));
   if (pe.Sections().empty()) {
     throw std::runtime_error("DumpToFile: PE has no sections");
   }
 
-  const PESection& last_section = pe.Sections().back();
+  const PeSection& last_section = pe.Sections().back();
   uint32_t size =
       last_section.header.VirtualAddress + last_section.header.Misc.VirtualSize;
 
@@ -1243,14 +1243,13 @@ void DumperDotnet::DumpToFile(const std::wstring& file_name) {
     if (VirtualQueryEx(process_.hProcess,
                        reinterpret_cast<void*>(current_address), &mbi,
                        sizeof(mbi)) == 0) {
-      throw std::runtime_error(
-          Format("VirtualQueryEx failed at %llX",
-                 static_cast<unsigned long long>(current_address)));
+      throw std::runtime_error(Format("VirtualQueryEx failed at %llX",
+                                      static_cast<uint64_t>(current_address)));
     }
     if (mbi.RegionSize == 0) {
       throw std::runtime_error(
           Format("VirtualQueryEx returned a zero region at %llX",
-                 static_cast<unsigned long long>(current_address)));
+                 static_cast<uint64_t>(current_address)));
     }
 
     const size_t chunk =
@@ -1266,9 +1265,9 @@ void DumperDotnet::DumpToFile(const std::wstring& file_name) {
       // the physical file, but eh...
       std::memset(buffer.data() + done, 0, chunk);
     } else {
-      throw std::runtime_error(
-          Format("Got unexpected region state %X at %llX", mbi.State,
-                 static_cast<unsigned long long>(current_address)));
+      throw std::runtime_error(Format("Got unexpected region state %X at %llX",
+                                      mbi.State,
+                                      static_cast<uint64_t>(current_address)));
     }
 
     done += static_cast<uint32_t>(mbi.RegionSize);

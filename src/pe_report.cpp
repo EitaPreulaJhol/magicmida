@@ -1,9 +1,7 @@
 // Magicmida - C++ port
 // Human-readable PE information used by the GUI.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "pe_report.h"
-
-#include "common.h"
-#include "stream.h"
 
 #include <algorithm>
 #include <cstring>
@@ -11,6 +9,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "common.h"
+#include "stream.h"
 
 namespace magicmida {
 namespace {
@@ -54,7 +55,7 @@ struct ParsedSection {
   uint32_t characteristics = 0;
 };
 
-struct ParsedPE {
+struct ParsedPe {
   bool valid = false;
   uint16_t machine = 0;
   uint16_t number_of_sections = 0;
@@ -77,8 +78,8 @@ struct ParsedPE {
   std::vector<ParsedSection> sections;
 };
 
-ParsedPE ReadPEInfo(const std::wstring& path) {
-  ParsedPE result;
+ParsedPe ReadPeInfo(const std::wstring& path) {
+  ParsedPe result;
 
   FileStream file(path, FileStream::Mode::kRead);
   std::vector<uint8_t> header(0x1000);
@@ -207,25 +208,25 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
 
 }  // namespace
 
-uint16_t ReadPEMachine(const std::wstring& target) {
-  return ReadPEInfo(target).machine;
+uint16_t ReadPeMachine(const std::wstring& target) {
+  return ReadPeInfo(target).machine;
 }
 
-bool ReadPEIsDll(const std::wstring& target) {
-  return ReadPEInfo(target).is_dll;
+bool ReadPeIsDll(const std::wstring& target) {
+  return ReadPeInfo(target).is_dll;
 }
 
-PEFlags ReadPEFlags(const std::wstring& target) {
-  const ParsedPE info = ReadPEInfo(target);
-  PEFlags flags;
+PeFlags ReadPeFlags(const std::wstring& target) {
+  const ParsedPe info = ReadPeInfo(target);
+  PeFlags flags;
   flags.machine = info.machine;
   flags.is_dll = info.is_dll;
   return flags;
 }
 
-void EmitPEInfo(const std::wstring& target,
+void EmitPeInfo(const std::wstring& target,
                 const std::function<void(const std::string&)>& emit) {
-  const ParsedPE info = ReadPEInfo(target);
+  const ParsedPe info = ReadPeInfo(target);
 
   emit(Format("File:             %s", WideToUtf8(target).c_str()));
   emit(Format("Machine:          %s", MachineName(info.machine).c_str()));
@@ -234,7 +235,7 @@ void EmitPEInfo(const std::wstring& target,
   emit(Format("Linker:           %u.%u", info.linker_major, info.linker_minor));
   emit(Format("Timestamp:        0x%08X", info.timestamp));
   emit(Format("Image base:       0x%llX",
-              static_cast<unsigned long long>(info.image_base)));
+              static_cast<uint64_t>(info.image_base)));
   emit(Format("Entry point:      0x%X", info.entry_point));
   emit(Format("Size of image:    0x%X", info.size_of_image));
   emit(Format("Checksum:         0x%X", info.checksum));
@@ -265,9 +266,9 @@ void EmitPEInfo(const std::wstring& target,
 
 void VerifyDump(const std::wstring& target, bool is_dll,
                 bool relocations_expected) {
-  ParsedPE info;
+  ParsedPe info;
   try {
-    info = ReadPEInfo(target);
+    info = ReadPeInfo(target);
   } catch (const std::exception& error) {
     LogF(kLogFatal, "Dump verification failed: %s", error.what());
     return;
@@ -311,7 +312,7 @@ void VerifyDump(const std::wstring& target, bool is_dll,
       LogF(kLogWarning,
            "Section %s raw data (0x%X+0x%X) lies outside the file (0x%llX).",
            section.name.c_str(), section.raw_offset, section.raw_size,
-           static_cast<unsigned long long>(info.file_size));
+           static_cast<uint64_t>(info.file_size));
       ok = false;
     }
     if ((section.characteristics & IMAGE_SCN_MEM_WRITE) != 0 &&
@@ -323,7 +324,7 @@ void VerifyDump(const std::wstring& target, bool is_dll,
   if (virtual_end > info.size_of_image) {
     LogF(kLogWarning,
          "SizeOfImage 0x%X is smaller than the sections end 0x%llX.",
-         info.size_of_image, static_cast<unsigned long long>(virtual_end));
+         info.size_of_image, static_cast<uint64_t>(virtual_end));
     ok = false;
   }
 

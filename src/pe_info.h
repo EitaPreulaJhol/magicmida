@@ -1,19 +1,20 @@
 // Magicmida - C++ port
 // PE header manipulation (ported from PEInfo.pas).
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_PE_INFO_H_
 #define MAGICMIDA_PE_INFO_H_
-
-#include "common.h"
-#include "stream.h"
 
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "common.h"
+#include "stream.h"
+
 namespace magicmida {
 
-struct PESection {
+struct PeSection {
   IMAGE_SECTION_HEADER header{};
   // Only populated for sections synthesized by the dumper (e.g. .import).
   std::vector<uint8_t> data;
@@ -21,25 +22,25 @@ struct PESection {
   void Rename(std::string_view new_name);
 };
 
-class PEHeader {
+class PeHeader {
  public:
   // `data` must point to a buffer containing at least a complete PE header
-  // (DOS header + NT headers + section table). `bufferSize` is used to
+  // (DOS header + NT headers + section table). `buffer_size` is used to
   // validate the section table; pass the real buffer size whenever possible.
-  explicit PEHeader(const uint8_t* data,
+  explicit PeHeader(const uint8_t* data,
                     size_t buffer_size = static_cast<size_t>(-1));
 
-  PESection* CreateSection(const std::string& name, uint32_t size);
+  PeSection* CreateSection(const std::string& name, uint32_t size);
   void DeleteSection(int index);
-  PESection* GetSectionByVA(uint32_t va);
+  PeSection* GetSectionByVa(uint32_t va);
 
   // Adds an uninitialized entry at the end of the section table.
   void AddSectionToArray();
 
-  uint32_t ConvertOffsetToRVAVector(uintptr_t offset) const;
+  uint32_t ConvertOffsetToRvaVector(uintptr_t offset) const;
 
   // Trims bloated (zero-padded) sections and returns the number of bytes
-  // removed. `iatRawAddr` is adjusted if it lies behind a trimmed section.
+  // removed. `iat_raw_addr` is adjusted if it lies behind a trimmed section.
   uint32_t TrimHugeSections(uint8_t* buf, uint32_t& iat_raw_addr);
 
   void Sanitize();
@@ -69,13 +70,13 @@ class PEHeader {
     }
   }
 
-  std::vector<PESection>& Sections() { return sections_; }
-  const std::vector<PESection>& Sections() const { return sections_; }
+  std::vector<PeSection>& Sections() { return sections_; }
+  const std::vector<PeSection>& Sections() const { return sections_; }
 
   IMAGE_NT_HEADERS& nt_headers() { return nt_headers_; }
   const IMAGE_NT_HEADERS& nt_headers() const { return nt_headers_; }
 
-  uint32_t LFANew() const { return lfa_new_; }
+  uint32_t LfaNew() const { return lfa_new_; }
   uint32_t DumpSize() const { return dump_size_; }
   uint32_t SizeOfImage() const {
     return nt_headers_.OptionalHeader.SizeOfImage;
@@ -83,7 +84,7 @@ class PEHeader {
 
  private:
   IMAGE_NT_HEADERS nt_headers_{};
-  std::vector<PESection> sections_;
+  std::vector<PeSection> sections_;
   uint32_t dump_size_ = 0;
   uint32_t lfa_new_ = 0;
 };

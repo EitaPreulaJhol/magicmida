@@ -1,16 +1,17 @@
 // Magicmida - C++ port
 // Debugger primitives: process creation, debug loop, HW/SW breakpoints.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "debugger_core.h"
-
-#include "dumper.h"
-#include "pe_info.h"
-#include "scyllahide.h"
-#include "stream.h"
 
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+
+#include "dumper.h"
+#include "pe_info.h"
+#include "scyllahide.h"
+#include "stream.h"
 
 namespace magicmida {
 
@@ -52,7 +53,7 @@ DebuggerCore::DebuggerCore(DWORD attach_pid) : attach_pid_(attach_pid) {}
 
 void DebuggerCore::Run() {
   try {
-    if (!PEExecute()) {
+    if (!PeExecute()) {
       throw std::runtime_error(
           Format("CreateProcess failed (error %lu)", GetLastError()));
     }
@@ -318,7 +319,7 @@ DWORD DebuggerCore::OnCreateThreadDebugEvent(DEBUG_EVENT& debug_event) {
   }
   threads_[debug_event.dwThreadId] =
       MM_EVENT_FIELD(debug_event, CreateThread).hThread;
-  UpdateDR(MM_EVENT_FIELD(debug_event, CreateThread).hThread);
+  UpdateDr(MM_EVENT_FIELD(debug_event, CreateThread).hThread);
 
   return DBG_CONTINUE;
 }
@@ -446,8 +447,7 @@ DWORD DebuggerCore::OnHardwareBreakpointEvent(DEBUG_EVENT& debug_event) {
         break;
       default:
         LogF(kLogFatal, "Unknown hwbp at %p (Dr6: %.8llX)",
-             reinterpret_cast<void*>(eip),
-             static_cast<unsigned long long>(context.Dr6));
+             reinterpret_cast<void*>(eip), static_cast<uint64_t>(context.Dr6));
         return DBG_EXCEPTION_NOT_HANDLED;
     }
 
@@ -455,8 +455,8 @@ DWORD DebuggerCore::OnHardwareBreakpointEvent(DEBUG_EVENT& debug_event) {
     OnHardwareBreakpoint(thread_handle, bp.address, context);
 
     // Disable and step over.
-    if (bp.type == HWBPType::kExecute && DisableBreakpoint(eip)) {
-      UpdateDR(thread_handle);
+    if (bp.type == HwbpType::kExecute && DisableBreakpoint(eip)) {
+      UpdateDr(thread_handle);
       context.ContextFlags = CONTEXT_CONTROL;
       context.EFlags |= 0x100;
       if (!SetThreadContext(thread_handle, &context)) {
@@ -486,7 +486,7 @@ DWORD DebuggerCore::OnSinglestep(uintptr_t /*bpAddress*/) {
   return DBG_CONTINUE;
 }
 
-void DebuggerCore::OnDLLLoad(const std::wstring& file_name,
+void DebuggerCore::OnDllLoad(const std::wstring& file_name,
                              void* /*baseAddress*/) {
   if (AsciiLowerCase(WideToUtf8(file_name)).find("aclayers.dll") !=
       std::string::npos) {
@@ -512,10 +512,10 @@ DWORD DebuggerCore::OnLoadDllDebugEvent(DEBUG_EVENT& debug_event) {
   }
 
   LogF(kLogInfo, "[%.8llX] Loaded %s",
-       static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+       static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
            MM_EVENT_FIELD(debug_event, LoadDll).lpBaseOfDll)),
        WideToUtf8(dll_name).c_str());
-  OnDLLLoad(dll_name, MM_EVENT_FIELD(debug_event, LoadDll).lpBaseOfDll);
+  OnDllLoad(dll_name, MM_EVENT_FIELD(debug_event, LoadDll).lpBaseOfDll);
   CloseHandle(MM_EVENT_FIELD(debug_event, LoadDll).hFile);
   return DBG_CONTINUE;
 }
@@ -539,7 +539,7 @@ DWORD DebuggerCore::OnOutputDebugStringEvent(DEBUG_EVENT& debug_event) {
   if (MM_EVENT_FIELD(debug_event, DebugString).nDebugStringLength > 0 &&
       MM_EVENT_FIELD(debug_event, DebugString).nDebugStringLength < 256) {
     char buffer[257]{};
-    if (RPM(reinterpret_cast<uintptr_t>(
+    if (Rpm(reinterpret_cast<uintptr_t>(
                 MM_EVENT_FIELD(debug_event, DebugString).lpDebugStringData),
             buffer,
             MM_EVENT_FIELD(debug_event, DebugString).nDebugStringLength)) {
@@ -560,12 +560,12 @@ DWORD DebuggerCore::OnRipEvent(DEBUG_EVENT& /*debugEvent*/) {
 // Process creation
 // --------------------------------------------------------------------------
 
-bool DebuggerCore::PEExecute() {
+bool DebuggerCore::PeExecute() {
   if (attach_pid_ != 0) {
     return DebugActiveProcess(attach_pid_) != FALSE;
   }
 
-  PEInspect();
+  PeInspect();
 
   // If Magicmida is executed with a different working dir, assume the user
   // wants that one as the working dir for the target.
@@ -587,7 +587,7 @@ bool DebuggerCore::PEExecute() {
 
   std::wstring command_line;
   if (is_dll_) {
-    MakeDLLExecutable();
+    MakeDllExecutable();
     LogF(kLogInfo, "Debugging modified DLL: %s",
          WideToUtf8(dll_executable_).c_str());
     command_line = L"\"" + dll_executable_ + L"\"";
@@ -614,7 +614,7 @@ bool DebuggerCore::PEExecute() {
   return created != FALSE;
 }
 
-void DebuggerCore::PEInspect() {
+void DebuggerCore::PeInspect() {
   FileStream file(executable_, FileStream::Mode::kRead);
   uint8_t header[0x1000]{};
   const int64_t file_size = file.Size();
@@ -651,7 +651,7 @@ void DebuggerCore::PEInspect() {
   is_dll_ = (nt->FileHeader.Characteristics & IMAGE_FILE_DLL) != 0;
 }
 
-void DebuggerCore::MakeDLLExecutable() {
+void DebuggerCore::MakeDllExecutable() {
   // These stubs set up the stack/parameters to stage a call to the DLL
   // entrypoint. Older Themida versions didn't strictly require it, newer ones
   // crash without it.
@@ -711,9 +711,9 @@ void DebuggerCore::MakeDLLExecutable() {
                sizeof(nt->OptionalHeader.DllCharacteristics));
   }
 
-  PEHeader pe(header, to_read);
-  PESection* ep_section =
-      pe.GetSectionByVA(nt->OptionalHeader.AddressOfEntryPoint);
+  PeHeader pe(header, to_read);
+  PeSection* ep_section =
+      pe.GetSectionByVa(nt->OptionalHeader.AddressOfEntryPoint);
   if (ep_section == nullptr || ep_section->header.SizeOfRawData < kStubSize) {
     throw std::runtime_error("Not enough room in EP section");
   }
@@ -747,7 +747,7 @@ void DebuggerCore::MakeDLLExecutable() {
   file.Write(&nt->OptionalHeader.AddressOfEntryPoint,
              sizeof(nt->OptionalHeader.AddressOfEntryPoint));
 
-  Dumper::SwitchSxSManifestType(file, pe, 2, 1);
+  Dumper::SwitchSxsManifestType(file, pe, 2, 1);
 }
 
 // --------------------------------------------------------------------------
@@ -768,24 +768,24 @@ void DebuggerCore::FetchMemoryRegions() {
   }
 }
 
-bool DebuggerCore::RPM(uintptr_t address, void* buf, size_t buf_size) {
+bool DebuggerCore::Rpm(uintptr_t address, void* buf, size_t buf_size) {
   return ReadProcessMemory(process_.hProcess, reinterpret_cast<void*>(address),
                            buf, buf_size, nullptr) != FALSE;
 }
 
-bool DebuggerCore::IsHWBreakpoint(uintptr_t address) {
+bool DebuggerCore::IsHwBreakpoint(uintptr_t address) {
   return hw_[0].address == address || hw_[1].address == address ||
          hw_[2].address == address || hw_[3].address == address;
 }
 
-void DebuggerCore::SetBreakpoint(uintptr_t address, HWBPType type,
+void DebuggerCore::SetBreakpoint(uintptr_t address, HwbpType type,
                                  bool refresh_contexts) {
   for (Breakpoint& breakpoint : hw_) {
     if (breakpoint.address == 0) {
       breakpoint.Change(address, type);
       if (refresh_contexts) {
         for (const auto& entry : threads_) {
-          UpdateDR(entry.second);
+          UpdateDr(entry.second);
         }
       }
       return;
@@ -815,7 +815,7 @@ void DebuggerCore::EnableBreakpoints() {
     breakpoint.disabled = false;
   }
   for (const auto& entry : threads_) {
-    UpdateDR(entry.second);
+    UpdateDr(entry.second);
   }
 }
 
@@ -826,7 +826,7 @@ void DebuggerCore::ResetBreakpoint(uintptr_t address) {
     }
   }
   for (const auto& entry : threads_) {
-    UpdateDR(entry.second);
+    UpdateDr(entry.second);
   }
 }
 
@@ -861,7 +861,7 @@ void DebuggerCore::ApplyDebugRegisters(CONTEXT& context) {
       (static_cast<uint64_t>(hw_[3].type) << 28));
 }
 
-void DebuggerCore::UpdateDR(HANDLE thread) {
+void DebuggerCore::UpdateDr(HANDLE thread) {
   CONTEXT context{};
   context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
   if (GetThreadContext(thread, &context)) {
@@ -910,11 +910,11 @@ DWORD DebuggerCore::OnSoftwareBreakpointEvent(DEBUG_EVENT& debug_event) {
     Log(kLogFatal, "Restoring original byte failed");
   }
 
-  const SoftBPAction action = OnSoftwareBreakpoint(thread_handle, eip);
+  const SoftBpAction action = OnSoftwareBreakpoint(thread_handle, eip);
 
-  if (action == SoftBPAction::kClearContinue) {
+  if (action == SoftBpAction::kClearContinue) {
     soft_bps_.erase(eip);
-  } else if (action == SoftBPAction::kKeepContinue) {
+  } else if (action == SoftBpAction::kKeepContinue) {
     // Keep, single step.
 #if defined(_WIN64)
     soft_bp_reenable_ = context.Rip;
@@ -923,7 +923,7 @@ DWORD DebuggerCore::OnSoftwareBreakpointEvent(DEBUG_EVENT& debug_event) {
 #endif
     context.EFlags |= 0x100;
     SetThreadContext(thread_handle, &context);
-  } else if (action == SoftBPAction::kKeepContinueNoStep) {
+  } else if (action == SoftBpAction::kKeepContinueNoStep) {
     if (!WriteByte(eip, 0xCC)) {
       Log(kLogFatal, "KeepContinueNoStep failed");
     }
@@ -932,19 +932,19 @@ DWORD DebuggerCore::OnSoftwareBreakpointEvent(DEBUG_EVENT& debug_event) {
   return DBG_CONTINUE;
 }
 
-void DebuggerCore::SetSoftBP(uintptr_t address) {
+void DebuggerCore::SetSoftBp(uintptr_t address) {
   uint8_t original = 0;
   if (!ReadProcessMemory(process_.hProcess, reinterpret_cast<void*>(address),
                          &original, 1, nullptr)) {
     throw std::runtime_error(Format("Read for soft bp at %llX failed",
-                                    static_cast<unsigned long long>(address)));
+                                    static_cast<uint64_t>(address)));
   }
 
   const auto it = soft_bps_.find(address);
   if (it != soft_bps_.end()) {
     if (original != 0xCC) {
       LogF(kLogFatal, "Soft bp inconsistency at %llX!",
-           static_cast<unsigned long long>(address));
+           static_cast<uint64_t>(address));
     }
     return;
   }
@@ -953,13 +953,13 @@ void DebuggerCore::SetSoftBP(uintptr_t address) {
 
   if (!WriteByte(address, 0xCC)) {
     throw std::runtime_error(Format("Write for soft bp at %llX failed",
-                                    static_cast<unsigned long long>(address)));
+                                    static_cast<uint64_t>(address)));
   }
 
   FlushInstructionCache(process_.hProcess, reinterpret_cast<void*>(address), 1);
 }
 
-void DebuggerCore::SoftBPClear() {
+void DebuggerCore::SoftBpClear() {
   for (const auto& entry : soft_bps_) {
     WriteByte(entry.first, entry.second);
   }

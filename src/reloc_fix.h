@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // Rebuilds base relocation tables for unpacked DLLs.
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_RELOC_FIX_H_
 #define MAGICMIDA_RELOC_FIX_H_
 

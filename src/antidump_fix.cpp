@@ -1,11 +1,12 @@
 // Magicmida - C++ port
 // VM anti-dump mitigation (ported from AntiDumpFix.pas).
+// SPDX-License-Identifier: GPL-3.0-only
 #include "antidump_fix.h"
-
-#include "vm_entry.h"
 
 #include <cstring>
 #include <vector>
+
+#include "vm_entry.h"
 
 namespace magicmida {
 namespace {
@@ -15,7 +16,7 @@ constexpr uint8_t kPushArgsRwProtect[] = {0x6A, 0x00, 0x54, 0x6A, 0x04, 0x68,
 constexpr uint8_t kPushArgsOldProtect[] = {0x54, 0xFF, 0x74, 0x24, 0x04, 0x68,
                                            0x00, 0x04, 0x00, 0x00, 0x68};
 
-#pragma pack(push, 1)
+MAGICMIDA_PACK_PUSH_1
 struct NewCode {
   uint8_t push_args1[sizeof(kPushArgsRwProtect)];
   uint32_t push_img_base1;
@@ -35,21 +36,21 @@ struct NewCode {
   uint8_t jmp_instr;
   uint32_t jmp_displ;
 };
-#pragma pack(pop)
+MAGICMIDA_PACK_POP
 
 }  // namespace
 
 AntiDumpFixer::AntiDumpFixer(HANDLE process, uintptr_t image_base)
     : process_(process), image_base_(image_base) {}
 
-bool AntiDumpFixer::RPM(uintptr_t address, void* buf, size_t buf_size) {
+bool AntiDumpFixer::Rpm(uintptr_t address, void* buf, size_t buf_size) {
   return ReadProcessMemory(process_, reinterpret_cast<void*>(address), buf,
                            buf_size, nullptr) != FALSE;
 }
 
-void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
+void AntiDumpFixer::RedirectOep(uintptr_t oep, uintptr_t iat) {
   uint8_t code[16]{};
-  if (!RPM(oep, code, sizeof(code))) {
+  if (!Rpm(oep, code, sizeof(code))) {
     Log(kLogFatal, "ReadProcessMemory failed");
     return;
   }
@@ -77,7 +78,7 @@ void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
 
   uint32_t virtual_protect_iat = 0;
   std::vector<uint32_t> iat_data(512);
-  RPM(iat, iat_data.data(), iat_data.size() * sizeof(uint32_t));
+  Rpm(iat, iat_data.data(), iat_data.size() * sizeof(uint32_t));
   for (size_t i = 0; i < iat_data.size(); ++i) {
     if (iat_data[i] == virtual_protect_address) {
       virtual_protect_iat = static_cast<uint32_t>(iat + i * 4);
@@ -102,8 +103,8 @@ void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
   // mov dword ptr [AddressOfEntryPoint], ThemidaEntrypoint
   new_code.mov_instr = 0x05C7;
   uint32_t lfa_new = 0;
-  if (!RPM(image_base_ + 0x3C, &lfa_new, sizeof(lfa_new)) ||
-      !RPM(image_base_ + lfa_new + 0x28, &new_code.entrypoint,
+  if (!Rpm(image_base_ + 0x3C, &lfa_new, sizeof(lfa_new)) ||
+      !Rpm(image_base_ + lfa_new + 0x28, &new_code.entrypoint,
            sizeof(new_code.entrypoint))) {
     Log(kLogFatal, "ReadProcessMemory failed");
     return;

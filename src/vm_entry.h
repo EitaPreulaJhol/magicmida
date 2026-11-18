@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // Recognition of Oreans/Themida/WinLicense virtual-machine entry stubs.
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_VM_ENTRY_H_
 #define MAGICMIDA_VM_ENTRY_H_
 

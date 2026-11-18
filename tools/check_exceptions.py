@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """Check that no new C++ exception sites are added to src/.
 
 The project keeps a documented waiver for the exceptions inherited from the

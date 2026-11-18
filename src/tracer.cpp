@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // Single-step tracer used while resolving protected IAT entries.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "tracer.h"
 
 #include <stdexcept>

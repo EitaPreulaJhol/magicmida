@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // Common helpers shared by all components.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "common.h"
 
 #include <algorithm>
@@ -405,7 +406,7 @@ uint32_t GetWindowsMajorVersion() {
   return info.dwMajorVersion;
 }
 
-uint32_t GetPETimestamp(const std::wstring& filename) {
+uint32_t GetPeTimestamp(const std::wstring& filename) {
   HANDLE file =
       CreateFileW(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);

@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // Embedded ScyllaHide integration.
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_SCYLLAHIDE_H_
 #define MAGICMIDA_SCYLLAHIDE_H_
 
@@ -7,8 +8,7 @@
 
 #include <string>
 
-namespace magicmida {
-namespace scyllahide {
+namespace magicmida::scyllahide {
 
 // Subset of the ScyllaHide "Magicmida" profile that is compiled into the
 // executable.  Keeping it in C++ means no scylla_hide.ini has to be shipped.
@@ -67,7 +67,6 @@ void OnDllLoad(const std::wstring& file_name);
 // after unpacking.
 void Stop();
 
-}  // namespace scyllahide
-}  // namespace magicmida
+}  // namespace magicmida::scyllahide
 
 #endif  // MAGICMIDA_SCYLLAHIDE_H_

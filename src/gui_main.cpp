@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // Native Win32 GUI front-end.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "common.h"
 #include "patcher.h"
 #include "pe_report.h"
@@ -13,11 +14,10 @@
 #include "themida32.h"
 #endif
 
-#include <windows.h>
-
 #include <commdlg.h>
 #include <richedit.h>
 #include <shellapi.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -273,7 +273,7 @@ const TargetFlags& CurrentTargetFlags() {
   }
 
   try {
-    const PEFlags flags = ReadPEFlags(target);
+    const PeFlags flags = ReadPeFlags(target);
     CachedTargetFlags().machine = flags.machine;
     CachedTargetFlags().is_dll = flags.is_dll;
     CachedTargetFlags().valid = true;
@@ -300,7 +300,7 @@ void MaybeLogTargetInfo() {
   LoggedTarget() = target;
   LogF(kLogGood, "Opened target: %s", WideToUtf8(target).c_str());
   try {
-    EmitPEInfo(target, [](const std::string& line) { Log(kLogInfo, line); });
+    EmitPeInfo(target, [](const std::string& line) { Log(kLogInfo, line); });
   } catch (const std::exception& error) {
     LogF(kLogWarning, "Could not read the target PE info: %s", error.what());
   }
@@ -665,7 +665,7 @@ bool PrepareOutputFile(const std::wstring& target) {
 
 void NormalizeOutputLayout(const std::wstring& file_name) {
   try {
-    NormalizePEFile(file_name);
+    NormalizePeFile(file_name);
   } catch (const std::exception& error) {
     LogF(kLogWarning, "PE layout normalization failed: %s", error.what());
   }
@@ -767,7 +767,7 @@ bool ExecuteJob(const Job& job) {
         break;
       }
       case Command::kInfo: {
-        EmitPEInfo(job.target,
+        EmitPeInfo(job.target,
                    [](const std::string& line) { Log(kLogInfo, line); });
         success = true;
         break;
@@ -797,7 +797,7 @@ DWORD WINAPI RunJobThread(LPVOID parameter) {
 bool ResolveJob(Job* job, uint16_t* machine, std::wstring* error) {
   uint16_t detected = 0;
   try {
-    detected = ReadPEMachine(job->target);
+    detected = ReadPeMachine(job->target);
   } catch (const std::exception& exception) {
     *error = L"Could not read the target PE header: ";
     *error += Utf8ToWide(exception.what());
@@ -892,9 +892,9 @@ void StartJob() {
     App().cancel_event_name.clear();
   }
 
-  PEFlags flags;
+  PeFlags flags;
   try {
-    flags = ReadPEFlags(job.target);
+    flags = ReadPeFlags(job.target);
   } catch (...) {
   }
 
@@ -1543,9 +1543,9 @@ int RunCommandLine(int argument_count, wchar_t** arguments) {
     return 1;
   }
 
-  PEFlags flags;
+  PeFlags flags;
   try {
-    flags = ReadPEFlags(job.target);
+    flags = ReadPeFlags(job.target);
   } catch (...) {
   }
 

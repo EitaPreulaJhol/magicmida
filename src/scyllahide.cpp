@@ -1,9 +1,8 @@
 // Magicmida - C++ port
 // Embedded ScyllaHide integration: resource loading, manual mapping, hook
 // installation and deferred user32/win32u hooking.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "scyllahide.h"
-
-#include "common.h"
 
 #include <windows.h>
 
@@ -12,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "common.h"
 #include "HookLibrary/HookMain.h"
 #include "InjectorCLI/ApplyHooking.h"
 #include "InjectorCLI/DynamicMapping.h"
@@ -26,8 +26,7 @@
 // against static objects with non-trivial destructors.
 scl::Logger g_log;
 
-namespace magicmida {
-namespace scyllahide {
+namespace magicmida::scyllahide {
 namespace {
 
 constexpr WORD kScyllaHookResourceId = 102;
@@ -402,8 +401,7 @@ void Stop() {
   CurrentSession() = nullptr;
 }
 
-}  // namespace scyllahide
-}  // namespace magicmida
+}  // namespace magicmida::scyllahide
 
 // Headless replacement for MessageBoxA used by the ScyllaHide injector.
 extern "C" int ScyllaHideMessageBoxA(HWND /*window*/, LPCSTR lp_text,

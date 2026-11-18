@@ -1,14 +1,15 @@
 // Magicmida - C++ port
 // Post-processing of unpacked files (ported from Patcher.pas).
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_PATCHER_H_
 #define MAGICMIDA_PATCHER_H_
+
+#include <memory>
+#include <string>
 
 #include "common.h"
 #include "pe_info.h"
 #include "stream.h"
-
-#include <memory>
-#include <string>
 
 namespace magicmida {
 
@@ -32,7 +33,7 @@ class Patcher {
 
  private:
   void RelocateExceptionTable();
-  void ShrinkPE();
+  void ShrinkPe();
   void ShrinkExportSect();
   // Expands a normalized layout back to file-offset == RVA for the legacy
   // data-section finders.
@@ -42,18 +43,18 @@ class Patcher {
   // because they check them during C runtime initialization (especially
   // .rdata).
   bool MapleCreateDataSections();
-  bool MSVCCreateDataSections();
+  bool MsvcCreateDataSections();
 
-  uintptr_t FindDataStartMSVC6();
-  bool FindDynTLSMSVC14(uintptr_t& dyn_tls_init);
+  uintptr_t FindDataStartMsvc6();
+  bool FindDynTlsMsvc14(uintptr_t& dyn_tls_init);
 
   std::wstring file_name_;
   MemoryStream stream_;
-  std::unique_ptr<PEHeader> pe_;
+  std::unique_ptr<PeHeader> pe_;
 };
 
 // Convenience wrapper for callers that only have the file path.
-void NormalizePEFile(const std::wstring& file_name);
+void NormalizePeFile(const std::wstring& file_name);
 
 }  // namespace magicmida
 

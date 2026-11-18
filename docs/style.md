@@ -1,8 +1,9 @@
 # Style policy
 
 First-party code in `src/` follows the Google C++ Style Guide. Vendored code
-under `vendor/` and generated tables are excluded. CI enforces formatting with
-`clang-format` and `cpplint`.
+under `vendor/` and generated tables are excluded. First-party files carry
+SPDX license identifiers. CI enforces formatting with `clang-format` and
+`cpplint`.
 
 ## Exceptions: documented waiver
 
@@ -28,16 +29,15 @@ Waiver conditions:
   as an exception required by the ScyllaHide sources.
 
 Migration path: reduce the baseline file by file, starting with boundaries
-that already return `bool` or error strings, then `Stream`, `PEHeader`,
+that already return `bool` or error strings, then `Stream`, `PeHeader`,
 `Patcher`, and `Dumper`, and finally remove the `try`/`catch` blocks in the
 GUI and debug loop. Delete this waiver when the baseline is empty.
 
 ## Other known deviations
 
-- `#pragma pack` is used for packed PE/BeaEngine layouts; a portability
-  wrapper is still pending.
-- Includes are grouped as project, system, then standard library; the
-  include-order cleanup is a separate change.
+- `gui_main.cpp` keeps its project headers before `<windows.h>` so `common.h`
+  can configure the Windows macros first.
 - `DebuggerCore` and `ThemidaCommon` expose `protected` state to their
   subclasses; accessors are pending.
-- File-level copyright/license headers are not present yet.
+- `disasm.h` mirrors the LGPL-3.0-only BeaEngine structures and carries a note
+  next to its SPDX identifier.

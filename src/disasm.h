@@ -1,12 +1,15 @@
 // Magicmida - C++ port
 // Thin wrapper around the bundled BeaEngine disassembler.
+// SPDX-License-Identifier: GPL-3.0-only
+// The BeaEngine structure definitions in this file are mirrored from
+// the LGPL-3.0-only BeaEngine header; see THIRD_PARTY_NOTICES.md.
 #ifndef MAGICMIDA_DISASM_H_
 #define MAGICMIDA_DISASM_H_
 
-#include "common.h"
-
 #include <cstddef>
 #include <cstdint>
+
+#include "common.h"
 
 namespace magicmida {
 
@@ -17,7 +20,7 @@ constexpr int kOutOfBlock = -2;
 
 // The following structures mirror the packed Delphi declarations in
 // BeaEngineDelphi.pas (which in turn mirror BeaEngine's public header).
-#pragma pack(push, 1)
+MAGICMIDA_PACK_PUSH_1
 
 struct TREX_Struct {
   uint8_t W_;
@@ -129,7 +132,7 @@ struct DISASM {
   uint8_t AbiSafetyPadding[256];
 };
 
-#pragma pack(pop)
+MAGICMIDA_PACK_POP
 
 static_assert(sizeof(void*) == 4 || sizeof(void*) == 8,
               "Unsupported pointer size");

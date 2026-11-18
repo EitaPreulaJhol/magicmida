@@ -1,12 +1,13 @@
 // Magicmida - C++ port
 // 64-bit Themida/WinLicense unpacking logic (ported from Themida64.pas).
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_THEMIDA64_H_
 #define MAGICMIDA_THEMIDA64_H_
 
-#include "themida_common.h"
-
 #include <cstdint>
 #include <string>
+
+#include "themida_common.h"
 
 namespace magicmida {
 
@@ -18,16 +19,16 @@ class ThemidaDebugger64 : public ThemidaCommon {
   ~ThemidaDebugger64() override = default;
 
  protected:
-  bool TraceIsAtAPI(Tracer& tracer, CONTEXT& context) override;
+  bool TraceIsAtApi(Tracer& tracer, CONTEXT& context) override;
 
   void OnDebugStart(HANDLE& file_handle, HANDLE thread_handle) override;
   DWORD OnAccessViolation(HANDLE thread_handle,
                           const EXCEPTION_RECORD& exception_record) override;
-  void OnDLLLoad(const std::wstring& file_name, void* base_address) override;
+  void OnDllLoad(const std::wstring& file_name, void* base_address) override;
   DWORD OnSinglestep(uintptr_t bp_address) override;
   void OnHardwareBreakpoint(HANDLE thread_handle, uintptr_t bp_address,
                             CONTEXT& context) override;
-  SoftBPAction OnSoftwareBreakpoint(HANDLE thread_handle,
+  SoftBpAction OnSoftwareBreakpoint(HANDLE thread_handle,
                                     uintptr_t bp_address) override;
 
  private:
@@ -35,7 +36,7 @@ class ThemidaDebugger64 : public ThemidaCommon {
   bool InImageBounds(uintptr_t address) const;
 
   void SelectThemidaSection(uintptr_t address);
-  void TMInit(HANDLE& file_handle);
+  void TmInit(HANDLE& file_handle);
 
   void InstallCodeSectionGuard();
   bool IsGuardedAddress(uintptr_t address);
@@ -44,8 +45,8 @@ class ThemidaDebugger64 : public ThemidaCommon {
 
   void FinishUnpacking(uintptr_t oep);
 
-  uintptr_t TryFindCorrectOEP(uintptr_t hit_address);
-  void WriteMSVCOEP(uintptr_t crt_startup);
+  uintptr_t TryFindCorrectOep(uintptr_t hit_address);
+  void WriteMsvcOep(uintptr_t crt_startup);
 
   void* close_handle_api_ = nullptr;
   void* virtual_alloc_api_ = nullptr;

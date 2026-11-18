@@ -1,18 +1,19 @@
 // Magicmida - C++ port
 // Shared Themida-unpacking logic (ported from ThemidaCommon.pas).
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_THEMIDA_COMMON_H_
 #define MAGICMIDA_THEMIDA_COMMON_H_
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "common.h"
 #include "debugger_core.h"
 #include "disasm.h"
 #include "dumper.h"
 #include "tracer.h"
-
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
 
 namespace magicmida {
 
@@ -39,23 +40,23 @@ class ThemidaCommon : public DebuggerCore {
 
   std::vector<uintptr_t> guard_addrs_;
 
-  // Used by TraceIsAtAPI.
+  // Used by TraceIsAtApi.
   uintptr_t traced_api_ = 0;
   uintptr_t sleep_api_ = 0;
   uintptr_t lstrlen_api_ = 0;
   uintptr_t trace_start_sp_ = 0;
   bool trace_in_vm_ = false;
 
-  void InitPEDetails(IMAGE_NT_HEADERS* nt);
-  void CheckVirtualizedOEP(uintptr_t oep);
+  void InitPeDetails(IMAGE_NT_HEADERS* nt);
+  void CheckVirtualizedOep(uintptr_t oep);
 
-  uintptr_t DetermineIATAddress(uintptr_t oep, Dumper& dumper);
+  uintptr_t DetermineIatAddress(uintptr_t oep, Dumper& dumper);
   void TraceImports(uintptr_t iat, Dumper& dumper);
 
-  uint32_t FindDynamicTM(const std::string& pattern, uintptr_t offset = 0);
-  uint32_t FindStaticTM(const std::string& pattern, uintptr_t offset = 0);
+  uint32_t FindDynamicTm(const std::string& pattern, uintptr_t offset = 0);
+  uint32_t FindStaticTm(const std::string& pattern, uintptr_t offset = 0);
 
-  virtual bool TraceIsAtAPI(Tracer& tracer, CONTEXT& context) = 0;
+  virtual bool TraceIsAtApi(Tracer& tracer, CONTEXT& context) = 0;
 };
 
 }  // namespace magicmida

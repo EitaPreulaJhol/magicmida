@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // PE header manipulation (ported from PEInfo.pas).
+// SPDX-License-Identifier: GPL-3.0-only
 #include "pe_info.h"
 
 #include <algorithm>
@@ -20,10 +21,10 @@ std::string SectionName(const IMAGE_SECTION_HEADER& header) {
 }  // namespace
 
 // --------------------------------------------------------------------------
-// PESection
+// PeSection
 // --------------------------------------------------------------------------
 
-void PESection::Rename(std::string_view new_name) {
+void PeSection::Rename(std::string_view new_name) {
   const size_t count = std::min(new_name.size(), sizeof(header.Name));
   std::memcpy(header.Name, new_name.data(), count);
   if (count < sizeof(header.Name)) {
@@ -32,24 +33,24 @@ void PESection::Rename(std::string_view new_name) {
 }
 
 // --------------------------------------------------------------------------
-// PEHeader
+// PeHeader
 // --------------------------------------------------------------------------
 
-PEHeader::PEHeader(const uint8_t* data, size_t buffer_size) {
+PeHeader::PeHeader(const uint8_t* data, size_t buffer_size) {
   if (data == nullptr || buffer_size < sizeof(IMAGE_DOS_HEADER)) {
-    throw std::runtime_error("PEHeader: buffer too small for a DOS header");
+    throw std::runtime_error("PeHeader: buffer too small for a DOS header");
   }
 
   const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(data);
   lfa_new_ = static_cast<uint32_t>(dos->e_lfanew);
   if (static_cast<uint64_t>(lfa_new_) + sizeof(IMAGE_NT_HEADERS) >
       buffer_size) {
-    throw std::runtime_error("PEHeader: truncated NT headers");
+    throw std::runtime_error("PeHeader: truncated NT headers");
   }
 
   const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(data + lfa_new_);
   if (nt->Signature != IMAGE_NT_SIGNATURE) {
-    throw std::runtime_error("PEHeader: signature mismatch");
+    throw std::runtime_error("PeHeader: signature mismatch");
   }
   nt_headers_ = *nt;
   dump_size_ = nt_headers_.OptionalHeader.SizeOfImage;
@@ -60,28 +61,28 @@ PEHeader::PEHeader(const uint8_t* data, size_t buffer_size) {
       static_cast<uint64_t>(nt_headers_.FileHeader.NumberOfSections) *
       sizeof(IMAGE_SECTION_HEADER);
   if (section_offset + section_bytes > buffer_size) {
-    throw std::runtime_error("PEHeader: truncated section table");
+    throw std::runtime_error("PeHeader: truncated section table");
   }
 
   const auto* section =
       reinterpret_cast<const IMAGE_SECTION_HEADER*>(data + section_offset);
   sections_.resize(nt_headers_.FileHeader.NumberOfSections);
   if (sections_.empty()) {
-    throw std::runtime_error("PEHeader: PE has no sections");
+    throw std::runtime_error("PeHeader: PE has no sections");
   }
   for (size_t i = 0; i < sections_.size(); ++i) {
     sections_[i].header = section[i];
   }
 }
 
-PESection* PEHeader::CreateSection(const std::string& name, uint32_t size) {
+PeSection* PeHeader::CreateSection(const std::string& name, uint32_t size) {
   if (sections_.empty()) {
     throw std::runtime_error("CreateSection: PE has no sections");
   }
 
   const IMAGE_SECTION_HEADER previous = sections_.back().header;
   sections_.emplace_back();
-  PESection& result = sections_.back();
+  PeSection& result = sections_.back();
 
   std::memcpy(result.header.Name, name.data(),
               std::min(name.size(), sizeof(result.header.Name)));
@@ -100,7 +101,7 @@ PESection* PEHeader::CreateSection(const std::string& name, uint32_t size) {
   return &result;
 }
 
-void PEHeader::DeleteSection(int index) {
+void PeHeader::DeleteSection(int index) {
   if (index <= 0 || index >= static_cast<int>(sections_.size())) {
     return;
   }
@@ -146,8 +147,8 @@ void PEHeader::DeleteSection(int index) {
   --nt_headers_.FileHeader.NumberOfSections;
 }
 
-PESection* PEHeader::GetSectionByVA(uint32_t va) {
-  for (PESection& section : sections_) {
+PeSection* PeHeader::GetSectionByVa(uint32_t va) {
+  for (PeSection& section : sections_) {
     if (section.header.VirtualAddress + section.header.Misc.VirtualSize > va) {
       return &section;
     }
@@ -155,8 +156,8 @@ PESection* PEHeader::GetSectionByVA(uint32_t va) {
   return nullptr;
 }
 
-void PEHeader::Sanitize() {
-  for (PESection& section : sections_) {
+void PeHeader::Sanitize() {
+  for (PeSection& section : sections_) {
     section.header.PointerToRawData = section.header.VirtualAddress;
     section.header.SizeOfRawData = section.header.Misc.VirtualSize;
   }
@@ -173,10 +174,10 @@ void PEHeader::Sanitize() {
   }
 }
 
-void PEHeader::SaveToStream(Stream& stream) {
+void PeHeader::SaveToStream(Stream& stream) {
   stream.Seek(lfa_new_, Stream::Origin::kBegin);
   stream.Write(&nt_headers_, sizeof(nt_headers_));
-  for (const PESection& section : sections_) {
+  for (const PeSection& section : sections_) {
     stream.Write(&section.header, sizeof(IMAGE_SECTION_HEADER));
   }
 
@@ -185,7 +186,7 @@ void PEHeader::SaveToStream(Stream& stream) {
   stream.Write(zeros, sizeof(zeros));
 }
 
-uint32_t PEHeader::TrimHugeSections(uint8_t* buf, uint32_t& iat_raw_addr) {
+uint32_t PeHeader::TrimHugeSections(uint8_t* buf, uint32_t& iat_raw_addr) {
   uint32_t result = 0;
 
   for (uint32_t i = 0; i < nt_headers_.FileHeader.NumberOfSections; ++i) {
@@ -252,12 +253,12 @@ uint32_t PEHeader::TrimHugeSections(uint8_t* buf, uint32_t& iat_raw_addr) {
   return result;
 }
 
-void PEHeader::AddSectionToArray() {
+void PeHeader::AddSectionToArray() {
   sections_.emplace_back();
 }
 
-uint32_t PEHeader::ConvertOffsetToRVAVector(uintptr_t offset) const {
-  for (const PESection& section : sections_) {
+uint32_t PeHeader::ConvertOffsetToRvaVector(uintptr_t offset) const {
+  for (const PeSection& section : sections_) {
     if (section.header.PointerToRawData <= offset &&
         static_cast<uintptr_t>(section.header.PointerToRawData) +
                 section.header.SizeOfRawData >

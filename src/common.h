@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // Common helpers shared by all components.
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_COMMON_H_
 #define MAGICMIDA_COMMON_H_
 
@@ -32,6 +33,15 @@
 // named union `u` in both the Windows SDK and MinGW headers. Older SDKs had
 // an anonymous union; the current SDK used by MSVC/VS 2026 does not.
 #define MM_EVENT_FIELD(event, field) ((event).u.field)
+// Portable wrapper for the 1-byte packed binary layouts used by the PE and
+// BeaEngine structures.  The project does not need any other packing value.
+#if defined(_MSC_VER)
+#define MAGICMIDA_PACK_PUSH_1 __pragma(pack(push, 1))
+#define MAGICMIDA_PACK_POP __pragma(pack(pop))
+#else
+#define MAGICMIDA_PACK_PUSH_1 _Pragma("pack(push, 1)")
+#define MAGICMIDA_PACK_POP _Pragma("pack(pop)")
+#endif
 
 namespace magicmida {
 
@@ -133,7 +143,7 @@ uint32_t FindStatic(const std::string& pattern, const uint8_t* buf,
 std::string AccessViolationFlagToStr(uint8_t flag);
 uint32_t GetWindowsBuildNumber();
 uint32_t GetWindowsMajorVersion();
-uint32_t GetPETimestamp(const std::wstring& filename);
+uint32_t GetPeTimestamp(const std::wstring& filename);
 
 // NTSTATUS is not exposed by the lean public headers MinGW ships with.
 using NtStatus = LONG;

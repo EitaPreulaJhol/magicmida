@@ -10,11 +10,8 @@
 // reconstruction is heuristic by nature (an integer that happens to fall
 // inside the image is indistinguishable from a pointer), which is why it is
 // opt-in.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "reloc_fix.h"
-
-#include "common.h"
-#include "pe_info.h"
-#include "stream.h"
 
 #include <algorithm>
 #include <cstring>
@@ -24,6 +21,10 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "common.h"
+#include "pe_info.h"
+#include "stream.h"
 
 namespace magicmida {
 namespace {
@@ -107,7 +108,7 @@ bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base) {
   MemoryStream stream;
   stream.LoadFromFile(file_name);
   const int64_t file_size = stream.Size();
-  PEHeader pe(stream.Memory(), static_cast<size_t>(file_size));
+  PeHeader pe(stream.Memory(), static_cast<size_t>(file_size));
   if (pe.Sections().empty()) {
     Log(kLogWarning, "Relocation fix skipped: the image has no sections.");
     return false;
@@ -131,8 +132,8 @@ bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base) {
     LogF(kLogWarning,
          "Image was dumped at %llX but its header says %llX; rebuilding "
          "relocations for the dump base.",
-         static_cast<unsigned long long>(image_base),
-         static_cast<unsigned long long>(preferred_base));
+         static_cast<uint64_t>(image_base),
+         static_cast<uint64_t>(preferred_base));
     nt.OptionalHeader.ImageBase =
         static_cast<decltype(nt.OptionalHeader.ImageBase)>(image_base);
   }
@@ -223,7 +224,7 @@ bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base) {
   std::vector<std::pair<uintptr_t, uintptr_t>> valid_ranges;
   valid_ranges.emplace_back(image_base,
                             image_base + nt.OptionalHeader.SizeOfHeaders);
-  for (const PESection& section : pe.Sections()) {
+  for (const PeSection& section : pe.Sections()) {
     const IMAGE_SECTION_HEADER& header = section.header;
     const uint32_t span =
         std::max(header.Misc.VirtualSize, header.SizeOfRawData);
@@ -318,7 +319,7 @@ bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base) {
     }
   }
 
-  PESection* reloc_section = nullptr;
+  PeSection* reloc_section = nullptr;
   if (reuse) {
     reloc_section = &pe.Sections()[existing_reloc_section];
     reloc_section->header.Misc.VirtualSize =
@@ -326,7 +327,7 @@ bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base) {
     Log(kLogInfo, "Reusing the existing .reloc section.");
   } else {
     // Rename a stale .reloc section so the new one is unambiguous.
-    for (PESection& section : pe.Sections()) {
+    for (PeSection& section : pe.Sections()) {
       if (SectionName(section.header) == ".reloc") {
         section.Rename(".reloc0");
         Log(kLogInfo, "Renamed the old .reloc section to .reloc0.");
@@ -335,7 +336,7 @@ bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base) {
 
     const uint32_t header_limit = pe.Sections()[0].header.PointerToRawData;
     const uint64_t section_table_end =
-        static_cast<uint64_t>(pe.LFANew()) + sizeof(IMAGE_NT_HEADERS) +
+        static_cast<uint64_t>(pe.LfaNew()) + sizeof(IMAGE_NT_HEADERS) +
         (static_cast<uint64_t>(pe.Sections().size()) + 1) *
             sizeof(IMAGE_SECTION_HEADER);
     if (section_table_end > header_limit) {
@@ -398,9 +399,9 @@ bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base) {
     stream.Write(padding.data(), padding.size());
   }
 
-  stream.Seek(pe.LFANew(), Stream::Origin::kBegin);
+  stream.Seek(pe.LfaNew(), Stream::Origin::kBegin);
   stream.Write(&nt, sizeof(nt));
-  for (const PESection& section : pe.Sections()) {
+  for (const PeSection& section : pe.Sections()) {
     stream.Write(&section.header, sizeof(IMAGE_SECTION_HEADER));
   }
 

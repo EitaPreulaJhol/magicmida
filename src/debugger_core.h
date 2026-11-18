@@ -1,18 +1,19 @@
 // Magicmida - C++ port
 // Debugger primitives: process creation, debug loop, HW/SW breakpoints.
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_DEBUGGER_CORE_H_
 #define MAGICMIDA_DEBUGGER_CORE_H_
-
-#include "common.h"
 
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "common.h"
+
 namespace magicmida {
 
-enum class HWBPType : uint8_t {
+enum class HwbpType : uint8_t {
   kExecute = 0,
   kWrite = 1,
   kReserved = 2,
@@ -21,10 +22,10 @@ enum class HWBPType : uint8_t {
 
 struct Breakpoint {
   uintptr_t address = 0;
-  HWBPType type = HWBPType::kExecute;
+  HwbpType type = HwbpType::kExecute;
   bool disabled = false;
 
-  void Change(uintptr_t new_address, HWBPType new_type) {
+  void Change(uintptr_t new_address, HwbpType new_type) {
     address = new_address;
     type = new_type;
     disabled = false;
@@ -33,7 +34,7 @@ struct Breakpoint {
   bool IsSet() const { return !disabled && address > 0; }
 };
 
-enum class SoftBPAction {
+enum class SoftBpAction {
   kKeepContinue,
   kClearContinue,
   kKeepContinueNoStep,
@@ -66,28 +67,28 @@ class DebuggerCore {
   HANDLE GetThread(DWORD thread_id);
 
   void FetchMemoryRegions();
-  bool RPM(uintptr_t address, void* buf, size_t buf_size);
+  bool Rpm(uintptr_t address, void* buf, size_t buf_size);
 
-  void SetBreakpoint(uintptr_t address, HWBPType type = HWBPType::kExecute,
+  void SetBreakpoint(uintptr_t address, HwbpType type = HwbpType::kExecute,
                      bool refresh_contexts = true);
   bool DisableBreakpoint(uintptr_t address);
   void EnableBreakpoints();
   void ResetBreakpoint(uintptr_t address);
-  bool IsHWBreakpoint(uintptr_t address);
+  bool IsHwBreakpoint(uintptr_t address);
   void ApplyDebugRegisters(CONTEXT& context);
-  void UpdateDR(HANDLE thread);
+  void UpdateDr(HANDLE thread);
 
-  void SetSoftBP(uintptr_t address);
-  void SoftBPClear();
+  void SetSoftBp(uintptr_t address);
+  void SoftBpClear();
 
   // Hooks (original virtual methods).
   virtual void OnDebugStart(HANDLE& file_handle, HANDLE thread_handle) = 0;
   virtual DWORD OnAccessViolation(HANDLE thread_handle,
                                   const EXCEPTION_RECORD& exception_record);
-  virtual void OnDLLLoad(const std::wstring& file_name, void* base_address);
+  virtual void OnDllLoad(const std::wstring& file_name, void* base_address);
   virtual void OnHardwareBreakpoint(HANDLE thread_handle, uintptr_t bp_address,
                                     CONTEXT& context) = 0;
-  virtual SoftBPAction OnSoftwareBreakpoint(HANDLE thread_handle,
+  virtual SoftBpAction OnSoftwareBreakpoint(HANDLE thread_handle,
                                             uintptr_t bp_address) = 0;
   virtual void OnUnsolicitedSoftwareBreakpoint(HANDLE thread_handle,
                                                uintptr_t bp_address);
@@ -104,9 +105,9 @@ class DebuggerCore {
   bool hide_thread_end_ = false;
 
  private:
-  bool PEExecute();
-  void PEInspect();
-  void MakeDLLExecutable();
+  bool PeExecute();
+  void PeInspect();
+  void MakeDllExecutable();
 
   DWORD OnCreateThreadDebugEvent(DEBUG_EVENT& debug_event);
   DWORD OnCreateProcessDebugEvent(DEBUG_EVENT& debug_event);

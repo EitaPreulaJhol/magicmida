@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // API set (OneCoreUAP) lookup, generated from OneCoreUAP.pas.
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_ONECORE_UAP_H_
 #define MAGICMIDA_ONECORE_UAP_H_
 
@@ -8,7 +9,7 @@
 namespace magicmida {
 
 // Returns the api-set DLL that hosts `api`, or an empty string when unknown.
-std::string GetOneCoreUAPModuleByAPI(const std::string& api);
+std::string GetOneCoreUapModuleByApi(const std::string& api);
 
 }  // namespace magicmida
 

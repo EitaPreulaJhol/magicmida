@@ -1,17 +1,18 @@
 // Magicmida - C++ port
 // Import reconstruction and process dumping (ported from Dumper.pas).
+// SPDX-License-Identifier: GPL-3.0-only
 #ifndef MAGICMIDA_DUMPER_H_
 #define MAGICMIDA_DUMPER_H_
-
-#include "common.h"
-#include "pe_info.h"
-#include "stream.h"
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "common.h"
+#include "pe_info.h"
+#include "stream.h"
 
 namespace magicmida {
 
@@ -53,16 +54,16 @@ class Dumper {
   Dumper(const Dumper&) = delete;
   Dumper& operator=(const Dumper&) = delete;
 
-  std::unique_ptr<PEHeader> Process();
-  void DumpToFile(const std::wstring& file_name, PEHeader& pe,
+  std::unique_ptr<PeHeader> Process();
+  void DumpToFile(const std::wstring& file_name, PeHeader& pe,
                   bool is_dll = false);
 
-  uint32_t DetermineIATSize(const uint8_t* iat);
-  bool IsAPIAddress(uintptr_t address);
+  uint32_t DetermineIatSize(const uint8_t* iat);
+  bool IsApiAddress(uintptr_t address);
 
   // Changes the manifest type between EXE/DLL so side-by-side functionality
   // (like pinned MSVC versions) works properly.
-  static void SwitchSxSManifestType(Stream& stream, PEHeader& pe,
+  static void SwitchSxsManifestType(Stream& stream, PeHeader& pe,
                                     int switch_from, int switch_to);
 
   // Must be called with the virtual address of the IAT before Process().
@@ -74,7 +75,7 @@ class Dumper {
   void TakeModuleSnapshot();
   RemoteModule* GetRemoteModule(const std::string& name);
   RemoteModule* GetRemoteModule(HMODULE base);
-  bool RPM(uintptr_t address, void* buf, size_t size);
+  bool Rpm(uintptr_t address, void* buf, size_t size);
   void MakeMemoryReadable(uintptr_t base, uintptr_t size);
   std::vector<OriginalImport> GetOriginalImports(const std::wstring& file_name);
   bool HasOriginalImport(const std::string& dll, const std::string& func) const;

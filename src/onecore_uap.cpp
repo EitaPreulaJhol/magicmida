@@ -1,5 +1,6 @@
 // Magicmida - C++ port
 // API set (OneCoreUAP) lookup, generated from OneCoreUAP.pas.
+// SPDX-License-Identifier: GPL-3.0-only
 #include "onecore_uap.h"
 
 #include <algorithm>
@@ -23,7 +24,7 @@ constexpr ApiSetEntry kApiSetApis[] = {
 
 }  // namespace
 
-std::string GetOneCoreUAPModuleByAPI(const std::string& api) {
+std::string GetOneCoreUapModuleByApi(const std::string& api) {
   const auto it =
       std::lower_bound(std::begin(kApiSetApis), std::end(kApiSetApis), api,
                        [](const ApiSetEntry& entry, const std::string& value) {
