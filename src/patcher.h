@@ -14,7 +14,7 @@ namespace magicmida {
 
 class Patcher {
  public:
-  explicit Patcher(const std::wstring& fileName);
+  explicit Patcher(const std::wstring& file_name);
   ~Patcher() = default;
 
   Patcher(const Patcher&) = delete;
@@ -45,7 +45,7 @@ class Patcher {
   bool MSVCCreateDataSections();
 
   uintptr_t FindDataStartMSVC6();
-  bool FindDynTLSMSVC14(uintptr_t& dynTlsInit);
+  bool FindDynTLSMSVC14(uintptr_t& dyn_tls_init);
 
   std::wstring file_name_;
   MemoryStream stream_;
@@ -53,7 +53,7 @@ class Patcher {
 };
 
 // Convenience wrapper for callers that only have the file path.
-void NormalizePEFile(const std::wstring& fileName);
+void NormalizePEFile(const std::wstring& file_name);
 
 }  // namespace magicmida
 

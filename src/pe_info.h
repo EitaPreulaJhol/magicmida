@@ -18,7 +18,7 @@ struct PESection {
   // Only populated for sections synthesized by the dumper (e.g. .import).
   std::vector<uint8_t> data;
 
-  void Rename(std::string_view newName);
+  void Rename(std::string_view new_name);
 };
 
 class PEHeader {
@@ -27,7 +27,7 @@ class PEHeader {
   // (DOS header + NT headers + section table). `bufferSize` is used to
   // validate the section table; pass the real buffer size whenever possible.
   explicit PEHeader(const uint8_t* data,
-                    size_t bufferSize = static_cast<size_t>(-1));
+                    size_t buffer_size = static_cast<size_t>(-1));
 
   PESection* CreateSection(const std::string& name, uint32_t size);
   void DeleteSection(int index);
@@ -40,14 +40,14 @@ class PEHeader {
 
   // Trims bloated (zero-padded) sections and returns the number of bytes
   // removed. `iatRawAddr` is adjusted if it lies behind a trimmed section.
-  uint32_t TrimHugeSections(uint8_t* buf, uint32_t& iatRawAddr);
+  uint32_t TrimHugeSections(uint8_t* buf, uint32_t& iat_raw_addr);
 
   void Sanitize();
   void SaveToStream(Stream& stream);
 
   template <typename T>
   void FileAlign(T& value) const {
-    const uint32_t alignment = ntHeaders.OptionalHeader.FileAlignment;
+    const uint32_t alignment = nt_headers_.OptionalHeader.FileAlignment;
     if (alignment == 0) {
       return;
     }
@@ -59,7 +59,7 @@ class PEHeader {
 
   template <typename T>
   void SectionAlign(T& value) const {
-    const uint32_t alignment = ntHeaders.OptionalHeader.SectionAlignment;
+    const uint32_t alignment = nt_headers_.OptionalHeader.SectionAlignment;
     if (alignment == 0) {
       return;
     }
@@ -74,9 +74,11 @@ class PEHeader {
 
   uint32_t LFANew() const { return lfa_new_; }
   uint32_t DumpSize() const { return dump_size_; }
-  uint32_t SizeOfImage() const { return ntHeaders.OptionalHeader.SizeOfImage; }
+  uint32_t SizeOfImage() const {
+    return nt_headers_.OptionalHeader.SizeOfImage;
+  }
 
-  IMAGE_NT_HEADERS ntHeaders{};
+  IMAGE_NT_HEADERS nt_headers_{};
 
  private:
   std::vector<PESection> sections_;

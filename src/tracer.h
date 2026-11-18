@@ -13,7 +13,7 @@ class Tracer {
  public:
   using Predicate = std::function<bool(Tracer&, CONTEXT&)>;
 
-  Tracer(DWORD processId, DWORD threadId, HANDLE threadHandle,
+  Tracer(DWORD process_id, DWORD thread_id, HANDLE thread_handle,
          Predicate predicate);
 
   void Trace(uintptr_t address, uint32_t limit);
@@ -23,7 +23,7 @@ class Tracer {
   bool LimitReached() const { return limit_reached_; }
 
  private:
-  DWORD OnSingleStep(const DEBUG_EVENT& debugEvent);
+  DWORD OnSingleStep(const DEBUG_EVENT& debug_event);
 
   DWORD process_id_;
   DWORD thread_id_;

@@ -230,7 +230,7 @@ bool LoadEmbeddedHookLibrary(std::vector<uint8_t>* image, std::string* error) {
     return false;
   }
 
-  const WORD kExpectedMachine =
+  constexpr WORD kExpectedMachine =
       sizeof(void*) == 4 ? IMAGE_FILE_MACHINE_I386 : IMAGE_FILE_MACHINE_AMD64;
   if (nt->FileHeader.Machine != kExpectedMachine) {
     *error = "embedded ScyllaHide hook library has the wrong architecture";
@@ -268,11 +268,11 @@ const Profile& DefaultProfile() {
   return profile;
 }
 
-bool Start(HANDLE process, DWORD processId, const Profile& profile,
+bool Start(HANDLE process, DWORD process_id, const Profile& profile,
            std::string* error) {
-  static std::string ignoredError;
+  static std::string ignored_error;
   if (error == nullptr) {
-    error = &ignoredError;
+    error = &ignored_error;
   }
   Stop();
 
@@ -300,13 +300,13 @@ bool Start(HANDLE process, DWORD processId, const Profile& profile,
   }
 
   Profile effective = profile;
-  bool userApiResolved = false;
+  bool user_api_resolved = false;
   try {
-    userApiResolved = ReadNtApiInformation(&session->hook_data);
+    user_api_resolved = ReadNtApiInformation(&session->hook_data);
   } catch (...) {
-    userApiResolved = false;
+    user_api_resolved = false;
   }
-  if (!userApiResolved) {
+  if (!user_api_resolved) {
     // The core ntdll/kernel32 hooks still work.  Disable the optional user32
     // hooks instead of failing the whole injection.
     effective.hook_nt_user_block_input = false;
@@ -317,25 +317,25 @@ bool Start(HANDLE process, DWORD processId, const Profile& profile,
   }
   FillHookDllData(&session->hook_data, effective);
 
-  DWORD pebFlags = 0;
+  DWORD peb_flags = 0;
   if (effective.fix_peb_being_debugged) {
-    pebFlags |= PEB_PATCH_BeingDebugged;
+    peb_flags |= PEB_PATCH_BeingDebugged;
   }
   if (effective.fix_peb_heap_flags) {
-    pebFlags |= PEB_PATCH_HeapFlags;
+    peb_flags |= PEB_PATCH_HeapFlags;
   }
   if (effective.fix_peb_nt_global_flag) {
-    pebFlags |= PEB_PATCH_NtGlobalFlag;
+    peb_flags |= PEB_PATCH_NtGlobalFlag;
   }
   if (effective.fix_peb_startup_info) {
-    pebFlags |= PEB_PATCH_ProcessParameters;
+    peb_flags |= PEB_PATCH_ProcessParameters;
   }
   if (effective.fix_peb_os_build_number) {
-    pebFlags |= PEB_PATCH_OsBuildNumber;
+    peb_flags |= PEB_PATCH_OsBuildNumber;
   }
 
-  if (pebFlags != 0) {
-    ApplyPEBPatch(process, pebFlags);
+  if (peb_flags != 0) {
+    ApplyPEBPatch(process, peb_flags);
   }
   if (effective.fix_peb_os_build_number) {
     ApplyNtdllVersionPatch(process);
@@ -360,12 +360,12 @@ bool Start(HANDLE process, DWORD processId, const Profile& profile,
   }
 
   LogF(kLogGood, "ScyllaHide: hook library mapped at %p (pid %lu)",
-       session->remote_base, processId);
+       session->remote_base, process_id);
   g_session = std::move(session);
   return true;
 }
 
-void OnDllLoad(const std::wstring& fileName) {
+void OnDllLoad(const std::wstring& file_name) {
   if (!g_session) {
     return;
   }
@@ -373,16 +373,16 @@ void OnDllLoad(const std::wstring& fileName) {
     return;
   }
 
-  const std::string lower = AsciiLowerCase(WideToUtf8(fileName));
-  const bool isUser32 = lower.find("user32.dll") != std::string::npos;
-  const bool isWin32u = lower.find("win32u.dll") != std::string::npos;
-  if (!isUser32 && !isWin32u) {
+  const std::string lower = AsciiLowerCase(WideToUtf8(file_name));
+  const bool is_user32 = lower.find("user32.dll") != std::string::npos;
+  const bool is_win32u = lower.find("win32u.dll") != std::string::npos;
+  if (!is_user32 && !is_win32u) {
     return;
   }
 
   if (ApplyUserHooks(*g_session)) {
     Log(kLogGood, "ScyllaHide: user32 hooks applied");
-  } else if (isUser32) {
+  } else if (is_user32) {
     Log(kLogWarning, "ScyllaHide: applying user32 hooks failed");
   } else {
     // win32u is mapped before user32 and the NtUser* stubs are not always
@@ -400,17 +400,17 @@ void Stop() {
 }  // namespace magicmida
 
 // Headless replacement for MessageBoxA used by the ScyllaHide injector.
-extern "C" int ScyllaHideMessageBoxA(HWND /*hWnd*/, LPCSTR lpText,
-                                     LPCSTR lpCaption, UINT uType) {
-  const UINT icon = uType & MB_ICONMASK;
-  const bool isError =
+extern "C" int ScyllaHideMessageBoxA(HWND /*window*/, LPCSTR lp_text,
+                                     LPCSTR lp_caption, UINT u_type) {
+  const UINT icon = u_type & MB_ICONMASK;
+  const bool is_error =
       icon == MB_ICONERROR || icon == MB_ICONHAND || icon == MB_ICONSTOP;
-  const bool isWarning = icon == MB_ICONWARNING || icon == MB_ICONEXCLAMATION;
+  const bool is_warning = icon == MB_ICONWARNING || icon == MB_ICONEXCLAMATION;
   const magicmida::LogMsgType type =
-      isError ? magicmida::kLogFatal
-              : (isWarning ? magicmida::kLogWarning : magicmida::kLogInfo);
+      is_error ? magicmida::kLogFatal
+               : (is_warning ? magicmida::kLogWarning : magicmida::kLogInfo);
   magicmida::LogF(type, "ScyllaHide: %s: %s",
-                  lpCaption != nullptr ? lpCaption : "?",
-                  lpText != nullptr ? lpText : "");
+                  lp_caption != nullptr ? lp_caption : "?",
+                  lp_text != nullptr ? lp_text : "");
   return 0;
 }

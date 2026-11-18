@@ -14,7 +14,7 @@ namespace magicmida {
 // moved to `dumpBase` because the dumped bytes contain addresses relative to
 // it. Existing relocation entries are preserved and merged with the
 // reconstructed ones. Returns true when a relocation table was written.
-bool FixDllRelocations(const std::wstring& fileName, uintptr_t dumpBase);
+bool FixDllRelocations(const std::wstring& file_name, uintptr_t dump_base);
 
 }  // namespace magicmida
 

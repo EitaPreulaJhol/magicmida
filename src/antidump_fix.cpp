@@ -42,9 +42,9 @@ struct NewCode {
 AntiDumpFixer::AntiDumpFixer(HANDLE process, uintptr_t image_base)
     : process_(process), image_base_(image_base) {}
 
-bool AntiDumpFixer::RPM(uintptr_t address, void* buf, size_t bufSize) {
+bool AntiDumpFixer::RPM(uintptr_t address, void* buf, size_t buf_size) {
   return ReadProcessMemory(process_, reinterpret_cast<void*>(address), buf,
-                           bufSize, nullptr) != FALSE;
+                           buf_size, nullptr) != FALSE;
 }
 
 void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
@@ -58,11 +58,11 @@ void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
       ParseVmStub(code, sizeof(code), static_cast<uint32_t>(oep - image_base_),
                   static_cast<uint64_t>(image_base_));
 
-  size_t prefixSize = 0;
+  size_t prefix_size = 0;
   if (stub.kind == VmStubKind::kPushJump) {
-    prefixSize = 5;
+    prefix_size = 5;
   } else if (stub.kind == VmStubKind::kPushPushJump) {
-    prefixSize = 10;
+    prefix_size = 10;
   } else if (stub.kind != VmStubKind::kDirectJump) {
     Log(kLogWarning, "Anti-dump fix skipped: unsupported OEP stub layout.");
     return;
@@ -72,72 +72,72 @@ void AntiDumpFixer::RedirectOEP(uintptr_t oep, uintptr_t iat) {
     return;
   }
 
-  const uintptr_t virtualProtectAddress = reinterpret_cast<uintptr_t>(
+  const uintptr_t virtual_protect_address = reinterpret_cast<uintptr_t>(
       GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "VirtualProtect"));
 
-  uint32_t virtualProtectIat = 0;
-  std::vector<uint32_t> iatData(512);
-  RPM(iat, iatData.data(), iatData.size() * sizeof(uint32_t));
-  for (size_t i = 0; i < iatData.size(); ++i) {
-    if (iatData[i] == virtualProtectAddress) {
-      virtualProtectIat = static_cast<uint32_t>(iat + i * 4);
+  uint32_t virtual_protect_iat = 0;
+  std::vector<uint32_t> iat_data(512);
+  RPM(iat, iat_data.data(), iat_data.size() * sizeof(uint32_t));
+  for (size_t i = 0; i < iat_data.size(); ++i) {
+    if (iat_data[i] == virtual_protect_address) {
+      virtual_protect_iat = static_cast<uint32_t>(iat + i * 4);
       break;
     }
   }
 
-  if (virtualProtectIat == 0) {
+  if (virtual_protect_iat == 0) {
     Log(kLogFatal, "VirtualProtect not found in IAT");
     return;
   }
 
-  NewCode newCode{};
+  NewCode new_code{};
 
   // VirtualProtect(ImageBase, $400, PAGE_READWRITE, OldProtect)
-  std::memcpy(newCode.push_args1, kPushArgsRwProtect,
+  std::memcpy(new_code.push_args1, kPushArgsRwProtect,
               sizeof(kPushArgsRwProtect));
-  newCode.push_img_base1 = static_cast<uint32_t>(image_base_);
-  newCode.call_instr1 = 0x15FF;
-  newCode.virtual_protect_addr1 = virtualProtectIat;
+  new_code.push_img_base1 = static_cast<uint32_t>(image_base_);
+  new_code.call_instr1 = 0x15FF;
+  new_code.virtual_protect_addr1 = virtual_protect_iat;
 
   // mov dword ptr [AddressOfEntryPoint], ThemidaEntrypoint
-  newCode.mov_instr = 0x05C7;
-  uint32_t lfaNew = 0;
-  if (!RPM(image_base_ + 0x3C, &lfaNew, sizeof(lfaNew)) ||
-      !RPM(image_base_ + lfaNew + 0x28, &newCode.entrypoint,
-           sizeof(newCode.entrypoint))) {
+  new_code.mov_instr = 0x05C7;
+  uint32_t lfa_new = 0;
+  if (!RPM(image_base_ + 0x3C, &lfa_new, sizeof(lfa_new)) ||
+      !RPM(image_base_ + lfa_new + 0x28, &new_code.entrypoint,
+           sizeof(new_code.entrypoint))) {
     Log(kLogFatal, "ReadProcessMemory failed");
     return;
   }
-  newCode.opt_hdr_entrypoint =
-      static_cast<uint32_t>(image_base_ + lfaNew + 0x28);
+  new_code.opt_hdr_entrypoint =
+      static_cast<uint32_t>(image_base_ + lfa_new + 0x28);
 
   // VirtualProtect(ImageBase, $400, OldProtect, _)
-  std::memcpy(newCode.push_args2, kPushArgsOldProtect,
+  std::memcpy(new_code.push_args2, kPushArgsOldProtect,
               sizeof(kPushArgsOldProtect));
-  newCode.push_img_base2 = static_cast<uint32_t>(image_base_);
-  newCode.call_instr2 = 0x15FF;
-  newCode.virtual_protect_addr2 = virtualProtectIat;
+  new_code.push_img_base2 = static_cast<uint32_t>(image_base_);
+  new_code.call_instr2 = 0x15FF;
+  new_code.virtual_protect_addr2 = virtual_protect_iat;
   // pop eax (undo initial "push 0" for OldProtect)
-  newCode.pop_stack = 0x58;
+  new_code.pop_stack = 0x58;
 
   // jmp vm: the final target comes from the parsed entry stub.
-  const uint32_t vmTarget =
+  const uint32_t vm_target =
       static_cast<uint32_t>(image_base_ + stub.target_rva);
-  const uint32_t jmpAddress =
-      static_cast<uint32_t>(oep + prefixSize + sizeof(NewCode));
-  newCode.jmp_instr = 0xE9;
-  newCode.jmp_displ = vmTarget - jmpAddress;
+  const uint32_t jmp_address =
+      static_cast<uint32_t>(oep + prefix_size + sizeof(NewCode));
+  new_code.jmp_instr = 0xE9;
+  new_code.jmp_displ = vm_target - jmp_address;
 
   // For push;jmp stubs the original pushed VM context must be preserved in
   // front of the mitigation stub.
-  std::vector<uint8_t> stubBytes;
-  stubBytes.insert(stubBytes.end(), code, code + prefixSize);
-  const auto* newCodeBytes = reinterpret_cast<const uint8_t*>(&newCode);
-  stubBytes.insert(stubBytes.end(), newCodeBytes,
-                   newCodeBytes + sizeof(newCode));
+  std::vector<uint8_t> stub_bytes;
+  stub_bytes.insert(stub_bytes.end(), code, code + prefix_size);
+  const auto* new_code_bytes = reinterpret_cast<const uint8_t*>(&new_code);
+  stub_bytes.insert(stub_bytes.end(), new_code_bytes,
+                    new_code_bytes + sizeof(new_code));
 
   if (WriteProcessMemory(process_, reinterpret_cast<void*>(oep),
-                         stubBytes.data(), stubBytes.size(), nullptr)) {
+                         stub_bytes.data(), stub_bytes.size(), nullptr)) {
     Log(kLogGood, "Installed VM anti-dump (PE header) mitigation at OEP");
     Log(kLogInfo,
         "NOTE: We assume there is enough space at the entrypoint, which may "

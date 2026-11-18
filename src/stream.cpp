@@ -38,11 +38,11 @@ void Stream::CopyFrom(Stream& source, int64_t count) {
       static_cast<size_t>(std::min<int64_t>(count, 64 * 1024)));
   int64_t remaining = count;
   while (remaining > 0) {
-    const size_t toRead = static_cast<size_t>(
+    const size_t to_read = static_cast<size_t>(
         std::min<int64_t>(remaining, static_cast<int64_t>(chunk.size())));
-    source.Read(chunk.data(), toRead);
-    Write(chunk.data(), toRead);
-    remaining -= static_cast<int64_t>(toRead);
+    source.Read(chunk.data(), to_read);
+    Write(chunk.data(), to_read);
+    remaining -= static_cast<int64_t>(to_read);
   }
 }
 
@@ -91,10 +91,10 @@ void FileStream::Read(void* buffer, size_t size) {
   uint8_t* cursor = static_cast<uint8_t*>(buffer);
   size_t remaining = size;
   while (remaining > 0) {
-    const DWORD toRead = static_cast<DWORD>(
+    const DWORD to_read = static_cast<DWORD>(
         std::min<size_t>(remaining, static_cast<size_t>(0x40000000)));
     DWORD read = 0;
-    if (!ReadFile(handle_, cursor, toRead, &read, nullptr)) {
+    if (!ReadFile(handle_, cursor, to_read, &read, nullptr)) {
       ThrowLastError("ReadFile");
     }
     if (read == 0) {
@@ -109,10 +109,10 @@ void FileStream::Write(const void* buffer, size_t size) {
   const uint8_t* cursor = static_cast<const uint8_t*>(buffer);
   size_t remaining = size;
   while (remaining > 0) {
-    const DWORD toWrite = static_cast<DWORD>(
+    const DWORD to_write = static_cast<DWORD>(
         std::min<size_t>(remaining, static_cast<size_t>(0x40000000)));
     DWORD written = 0;
-    if (!WriteFile(handle_, cursor, toWrite, &written, nullptr)) {
+    if (!WriteFile(handle_, cursor, to_write, &written, nullptr)) {
       ThrowLastError("WriteFile");
     }
     if (written == 0) {

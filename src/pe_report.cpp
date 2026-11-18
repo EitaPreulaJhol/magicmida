@@ -83,48 +83,48 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
   FileStream file(path, FileStream::Mode::kRead);
   std::vector<uint8_t> header(0x1000);
   result.file_size = static_cast<uint64_t>(file.Size());
-  const size_t toRead = static_cast<size_t>(
+  const size_t to_read = static_cast<size_t>(
       std::min<int64_t>(static_cast<int64_t>(header.size()), file.Size()));
-  if (toRead < sizeof(IMAGE_DOS_HEADER)) {
+  if (to_read < sizeof(IMAGE_DOS_HEADER)) {
     throw std::runtime_error("File is too small to be a PE file.");
   }
-  file.Read(header.data(), toRead);
+  file.Read(header.data(), to_read);
 
   const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(header.data());
-  const size_t ntOffset = static_cast<size_t>(dos->e_lfanew);
-  if (ntOffset + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) > toRead) {
+  const size_t nt_offset = static_cast<size_t>(dos->e_lfanew);
+  if (nt_offset + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) > to_read) {
     throw std::runtime_error("Invalid PE header offset.");
   }
 
   const uint32_t signature =
-      *reinterpret_cast<const uint32_t*>(header.data() + ntOffset);
+      *reinterpret_cast<const uint32_t*>(header.data() + nt_offset);
   if (signature != IMAGE_NT_SIGNATURE) {
     throw std::runtime_error("PE signature mismatch.");
   }
 
-  const auto* fileHeader = reinterpret_cast<const IMAGE_FILE_HEADER*>(
-      header.data() + ntOffset + sizeof(uint32_t));
-  result.machine = fileHeader->Machine;
-  result.number_of_sections = fileHeader->NumberOfSections;
-  result.timestamp = fileHeader->TimeDateStamp;
-  result.is_dll = (fileHeader->Characteristics & IMAGE_FILE_DLL) != 0;
+  const auto* file_header = reinterpret_cast<const IMAGE_FILE_HEADER*>(
+      header.data() + nt_offset + sizeof(uint32_t));
+  result.machine = file_header->Machine;
+  result.number_of_sections = file_header->NumberOfSections;
+  result.timestamp = file_header->TimeDateStamp;
+  result.is_dll = (file_header->Characteristics & IMAGE_FILE_DLL) != 0;
   result.relocs_stripped =
-      (fileHeader->Characteristics & IMAGE_FILE_RELOCS_STRIPPED) != 0;
+      (file_header->Characteristics & IMAGE_FILE_RELOCS_STRIPPED) != 0;
 
-  const size_t optionalOffset =
-      ntOffset + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER);
-  if (optionalOffset + 2 > toRead) {
+  const size_t optional_offset =
+      nt_offset + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER);
+  if (optional_offset + 2 > to_read) {
     throw std::runtime_error("Missing optional header.");
   }
   result.optional_magic =
-      *reinterpret_cast<const uint16_t*>(header.data() + optionalOffset);
+      *reinterpret_cast<const uint16_t*>(header.data() + optional_offset);
 
   if (result.optional_magic == 0x10B) {
-    if (optionalOffset + sizeof(IMAGE_OPTIONAL_HEADER32) > toRead) {
+    if (optional_offset + sizeof(IMAGE_OPTIONAL_HEADER32) > to_read) {
       throw std::runtime_error("Truncated PE32 optional header.");
     }
     const auto* optional = reinterpret_cast<const IMAGE_OPTIONAL_HEADER32*>(
-        header.data() + optionalOffset);
+        header.data() + optional_offset);
     result.linker_major = optional->MajorLinkerVersion;
     result.linker_minor = optional->MinorLinkerVersion;
     result.entry_point = optional->AddressOfEntryPoint;
@@ -146,11 +146,11 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
           optional->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
     }
   } else if (result.optional_magic == 0x20B) {
-    if (optionalOffset + sizeof(IMAGE_OPTIONAL_HEADER64) > toRead) {
+    if (optional_offset + sizeof(IMAGE_OPTIONAL_HEADER64) > to_read) {
       throw std::runtime_error("Truncated PE32+ optional header.");
     }
     const auto* optional = reinterpret_cast<const IMAGE_OPTIONAL_HEADER64*>(
-        header.data() + optionalOffset);
+        header.data() + optional_offset);
     result.linker_major = optional->MajorLinkerVersion;
     result.linker_minor = optional->MinorLinkerVersion;
     result.entry_point = optional->AddressOfEntryPoint;
@@ -175,18 +175,19 @@ ParsedPE ReadPEInfo(const std::wstring& path) {
     throw std::runtime_error("Unknown optional header magic.");
   }
 
-  const size_t sectionOffset =
-      optionalOffset + fileHeader->SizeOfOptionalHeader;
-  const size_t sectionSize = sizeof(IMAGE_SECTION_HEADER) *
-                             static_cast<size_t>(fileHeader->NumberOfSections);
-  if (sectionOffset + sectionSize > toRead) {
+  const size_t section_offset =
+      optional_offset + file_header->SizeOfOptionalHeader;
+  const size_t section_size =
+      sizeof(IMAGE_SECTION_HEADER) *
+      static_cast<size_t>(file_header->NumberOfSections);
+  if (section_offset + section_size > to_read) {
     throw std::runtime_error("Truncated section table.");
   }
 
-  result.sections.reserve(fileHeader->NumberOfSections);
-  for (size_t i = 0; i < fileHeader->NumberOfSections; ++i) {
+  result.sections.reserve(file_header->NumberOfSections);
+  for (size_t i = 0; i < file_header->NumberOfSections; ++i) {
     const auto* section = reinterpret_cast<const IMAGE_SECTION_HEADER*>(
-        header.data() + sectionOffset + i * sizeof(IMAGE_SECTION_HEADER));
+        header.data() + section_offset + i * sizeof(IMAGE_SECTION_HEADER));
 
     char name[9]{};
     std::memcpy(name, section->Name, 8);
@@ -275,34 +276,34 @@ void VerifyDump(const std::wstring& target, bool is_dll,
   Log(kLogInfo, "Verifying the dump...");
   bool ok = true;
 
-  const ParsedSection* entrySection = nullptr;
+  const ParsedSection* entry_section = nullptr;
   for (const ParsedSection& section : info.sections) {
     const uint32_t span = std::max(section.virtual_size, section.raw_size);
     if (info.entry_point >= section.virtual_address &&
         info.entry_point < section.virtual_address + span) {
-      entrySection = &section;
+      entry_section = &section;
       break;
     }
   }
   if (info.entry_point == 0) {
     Log(kLogInfo, "No entry point (AddressOfEntryPoint is zero).");
-  } else if (entrySection == nullptr) {
+  } else if (entry_section == nullptr) {
     LogF(kLogWarning, "Entry point 0x%X is outside every section.",
          info.entry_point);
     ok = false;
-  } else if ((entrySection->characteristics & IMAGE_SCN_MEM_EXECUTE) == 0) {
+  } else if ((entry_section->characteristics & IMAGE_SCN_MEM_EXECUTE) == 0) {
     LogF(kLogWarning, "Entry point 0x%X is in non-executable section %s.",
-         info.entry_point, entrySection->name.c_str());
+         info.entry_point, entry_section->name.c_str());
     ok = false;
   } else {
     LogF(kLogInfo, "Entry point 0x%X is in %s.", info.entry_point,
-         entrySection->name.c_str());
+         entry_section->name.c_str());
   }
 
-  uint64_t virtualEnd = 0;
+  uint64_t virtual_end = 0;
   for (const ParsedSection& section : info.sections) {
-    virtualEnd = std::max<uint64_t>(
-        virtualEnd,
+    virtual_end = std::max<uint64_t>(
+        virtual_end,
         static_cast<uint64_t>(section.virtual_address) + section.virtual_size);
     if (section.raw_size != 0 &&
         static_cast<uint64_t>(section.raw_offset) + section.raw_size >
@@ -319,10 +320,10 @@ void VerifyDump(const std::wstring& target, bool is_dll,
            section.name.c_str());
     }
   }
-  if (virtualEnd > info.size_of_image) {
+  if (virtual_end > info.size_of_image) {
     LogF(kLogWarning,
          "SizeOfImage 0x%X is smaller than the sections end 0x%llX.",
-         info.size_of_image, static_cast<unsigned long long>(virtualEnd));
+         info.size_of_image, static_cast<unsigned long long>(virtual_end));
     ok = false;
   }
 

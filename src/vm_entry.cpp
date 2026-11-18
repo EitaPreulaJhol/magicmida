@@ -24,7 +24,7 @@ uint32_t ToRva(uint64_t value, uint64_t image_base) {
 
 }  // namespace
 
-VmStubInfo ParseVmStub(const uint8_t* code, size_t size, uint32_t stubRva,
+VmStubInfo ParseVmStub(const uint8_t* code, size_t size, uint32_t stub_rva,
                        uint64_t image_base) {
   VmStubInfo info;
   if (code == nullptr || size < 2) {
@@ -32,11 +32,11 @@ VmStubInfo ParseVmStub(const uint8_t* code, size_t size, uint32_t stubRva,
   }
 
   const auto direct = [&](VmStubKind kind, size_t instruction_size,
-                          int32_t displacement, uint32_t operandBias) {
+                          int32_t displacement, uint32_t operand_bias) {
     info.kind = kind;
     info.instruction_size = static_cast<uint32_t>(instruction_size);
     const int64_t target =
-        static_cast<int64_t>(stubRva) + operandBias + displacement;
+        static_cast<int64_t>(stub_rva) + operand_bias + displacement;
     if (target > 0) {
       info.target_rva = static_cast<uint32_t>(target);
     }
@@ -93,7 +93,7 @@ VmStubInfo ParseVmStub(const uint8_t* code, size_t size, uint32_t stubRva,
     info.kind = VmStubKind::kPushJump;
     info.instruction_size = 10;
     const int64_t target =
-        static_cast<int64_t>(stubRva) + 10 + Read<int32_t>(code, 6);
+        static_cast<int64_t>(stub_rva) + 10 + Read<int32_t>(code, 6);
     if (target > 0) {
       info.target_rva = static_cast<uint32_t>(target);
     }
@@ -104,7 +104,7 @@ VmStubInfo ParseVmStub(const uint8_t* code, size_t size, uint32_t stubRva,
     info.kind = VmStubKind::kPushPushJump;
     info.instruction_size = 15;
     const int64_t target =
-        static_cast<int64_t>(stubRva) + 15 + Read<int32_t>(code, 11);
+        static_cast<int64_t>(stub_rva) + 15 + Read<int32_t>(code, 11);
     if (target > 0) {
       info.target_rva = static_cast<uint32_t>(target);
     }

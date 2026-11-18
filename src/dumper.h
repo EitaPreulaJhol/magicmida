@@ -46,7 +46,7 @@ struct OriginalImport {
 
 class Dumper {
  public:
-  Dumper(const PROCESS_INFORMATION& process, const std::wstring& originalFile,
+  Dumper(const PROCESS_INFORMATION& process, const std::wstring& original_file,
          uintptr_t image_base, uintptr_t oep);
   ~Dumper();
 
@@ -54,7 +54,7 @@ class Dumper {
   Dumper& operator=(const Dumper&) = delete;
 
   std::unique_ptr<PEHeader> Process();
-  void DumpToFile(const std::wstring& fileName, PEHeader& pe,
+  void DumpToFile(const std::wstring& file_name, PEHeader& pe,
                   bool is_dll = false);
 
   uint32_t DetermineIATSize(const uint8_t* iat);
@@ -63,10 +63,10 @@ class Dumper {
   // Changes the manifest type between EXE/DLL so side-by-side functionality
   // (like pinned MSVC versions) works properly.
   static void SwitchSxSManifestType(Stream& stream, PEHeader& pe,
-                                    int switchFrom, int switchTo);
+                                    int switch_from, int switch_to);
 
   // Virtual address of the IAT in the target process.
-  uintptr_t IAT = 0;
+  uintptr_t iat_ = 0;
 
  private:
   void GatherModuleExportsFromRemoteProcess(RemoteModule& module);
@@ -76,7 +76,7 @@ class Dumper {
   RemoteModule* GetRemoteModule(HMODULE base);
   bool RPM(uintptr_t address, void* buf, size_t size);
   void MakeMemoryReadable(uintptr_t base, uintptr_t size);
-  std::vector<OriginalImport> GetOriginalImports(const std::wstring& fileName);
+  std::vector<OriginalImport> GetOriginalImports(const std::wstring& file_name);
   bool HasOriginalImport(const std::string& dll, const std::string& func) const;
 
 #if !defined(_WIN64)
@@ -104,7 +104,7 @@ class DumperDotnet {
  public:
   DumperDotnet(const PROCESS_INFORMATION& process, uintptr_t image_base);
 
-  void DumpToFile(const std::wstring& fileName);
+  void DumpToFile(const std::wstring& file_name);
 
  private:
   PROCESS_INFORMATION process_{};

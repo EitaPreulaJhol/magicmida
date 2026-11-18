@@ -35,7 +35,7 @@ struct VmStubInfo {
 // Parses a VM entry stub from `code` at `stubRva`. `image_base` converts
 // absolute immediates (push/mov) into RVAs. Requires at least 16 bytes for
 // the longest form; returns kind == kNone when the bytes do not match.
-VmStubInfo ParseVmStub(const uint8_t* code, size_t size, uint32_t stubRva,
+VmStubInfo ParseVmStub(const uint8_t* code, size_t size, uint32_t stub_rva,
                        uint64_t image_base);
 
 }  // namespace magicmida

@@ -7,11 +7,11 @@
 
 namespace magicmida {
 
-Tracer::Tracer(DWORD processId, DWORD threadId, HANDLE threadHandle,
+Tracer::Tracer(DWORD process_id, DWORD thread_id, HANDLE thread_handle,
                Predicate predicate)
-    : process_id_(processId),
-      thread_id_(threadId),
-      thread_handle_(threadHandle),
+    : process_id_(process_id),
+      thread_id_(thread_id),
+      thread_handle_(thread_handle),
       predicate_(std::move(predicate)) {}
 
 void Tracer::Trace(uintptr_t address, uint32_t limit) {
@@ -50,8 +50,8 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
       throw std::runtime_error("Cancelled by the user");
     }
 
-    DEBUG_EVENT debugEvent{};
-    if (!WaitForDebugEvent(&debugEvent, 200)) {
+    DEBUG_EVENT debug_event{};
+    if (!WaitForDebugEvent(&debug_event, 200)) {
       const DWORD error = GetLastError();
       if (error == ERROR_SEM_TIMEOUT) {
         continue;
@@ -60,25 +60,25 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
           Format("WaitForDebugEvent failed during tracing (error %lu)", error));
     }
 
-    if (debugEvent.dwThreadId != thread_id_) {
-      LogF(kLogInfo, "Suspending spurious thread %lu", debugEvent.dwThreadId);
+    if (debug_event.dwThreadId != thread_id_) {
+      LogF(kLogInfo, "Suspending spurious thread %lu", debug_event.dwThreadId);
       HANDLE thread =
           OpenThread(THREAD_SUSPEND_RESUME, FALSE,
-                     debugEvent.dwThreadId);  // 2 == THREAD_SUSPEND_RESUME
+                     debug_event.dwThreadId);  // 2 == THREAD_SUSPEND_RESUME
       if (thread != nullptr && thread != INVALID_HANDLE_VALUE) {
         SuspendThread(thread);
         CloseHandle(thread);
       }
-      ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId,
+      ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId,
                          DBG_CONTINUE);
       continue;
     }
 
-    switch (debugEvent.dwDebugEventCode) {
+    switch (debug_event.dwDebugEventCode) {
       case EXCEPTION_DEBUG_EVENT:
-        if (MM_EVENT_FIELD(debugEvent, Exception)
+        if (MM_EVENT_FIELD(debug_event, Exception)
                 .ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
-          status = OnSingleStep(debugEvent);
+          status = OnSingleStep(debug_event);
           if (status == DBG_CONTROL_BREAK) {
             // Leave the single-step event pending on purpose: the target
             // stays stopped at the traced address until the next Trace()
@@ -88,11 +88,11 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
         } else {
           throw std::runtime_error(Format(
               "Unexpected exception during tracing: %.8X at %p in thread %lu",
-              MM_EVENT_FIELD(debugEvent, Exception)
+              MM_EVENT_FIELD(debug_event, Exception)
                   .ExceptionRecord.ExceptionCode,
-              MM_EVENT_FIELD(debugEvent, Exception)
+              MM_EVENT_FIELD(debug_event, Exception)
                   .ExceptionRecord.ExceptionAddress,
-              debugEvent.dwThreadId));
+              debug_event.dwThreadId));
         }
         break;
 
@@ -101,7 +101,7 @@ void Tracer::Trace(uintptr_t address, uint32_t limit) {
         break;
     }
 
-    ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, status);
+    ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, status);
   }
 }
 

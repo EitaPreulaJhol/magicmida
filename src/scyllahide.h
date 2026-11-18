@@ -55,13 +55,13 @@ const Profile& DefaultProfile();
 // Injects the embedded hook library into `process`, which must already be
 // stopped by the debugger (typically at CREATE_PROCESS_DEBUG_EVENT).
 // Returns false and fills `error` on failure.
-bool Start(HANDLE process, DWORD processId, const Profile& profile,
+bool Start(HANDLE process, DWORD process_id, const Profile& profile,
            std::string* error);
 
 // Called for LOAD_DLL_DEBUG_EVENT. Applies the user32 hooks when user32.dll
 // (or win32u.dll) becomes available. The win32u attempt can fail transiently
 // before user32 finishes initializing; only a failure on user32 is warned.
-void OnDllLoad(const std::wstring& fileName);
+void OnDllLoad(const std::wstring& file_name);
 
 // Drops the session state.  The target is not unhooked; it normally exits
 // after unpacking.

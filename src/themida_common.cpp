@@ -15,20 +15,20 @@
 namespace magicmida {
 namespace {
 
-std::string SafeString(const char* data, size_t maxLength) {
+std::string SafeString(const char* data, size_t max_length) {
   size_t length = 0;
-  while (length < maxLength && data[length] != '\0') {
+  while (length < max_length && data[length] != '\0') {
     ++length;
   }
   return std::string(data, length);
 }
 
-uint32_t FindDelphiCall(const uint8_t* codeDump, uint32_t codeSize) {
+uint32_t FindDelphiCall(const uint8_t* code_dump, uint32_t code_size) {
   // Delphi has type metadata at its .text base rather than code.
   uint32_t i = 0;
   uint32_t counter = 0;
-  while (i + 6 < codeSize) {
-    if (*reinterpret_cast<const uint16_t*>(codeDump + i) == 0x25FF) {
+  while (i + 6 < code_size) {
+    if (*reinterpret_cast<const uint16_t*>(code_dump + i) == 0x25FF) {
       ++counter;
       if (counter == 3) {  // Skip the first two for good measure
         return i;
@@ -39,10 +39,10 @@ uint32_t FindDelphiCall(const uint8_t* codeDump, uint32_t codeSize) {
   return 0;
 }
 
-uint32_t FindGoBuildIdEnd(const uint8_t* codeDump, uint32_t codeSize) {
+uint32_t FindGoBuildIdEnd(const uint8_t* code_dump, uint32_t code_size) {
   // Go has "Go build ID" at the start of .text.
-  for (uint32_t i = 0; i + 2 <= codeSize; ++i) {
-    if (*reinterpret_cast<const uint16_t*>(codeDump + i) == 0xFF20) {
+  for (uint32_t i = 0; i + 2 <= code_size; ++i) {
+    if (*reinterpret_cast<const uint16_t*>(code_dump + i) == 0xFF20) {
       return i + 2;  // 20 FF marks the end
     }
   }
@@ -82,7 +82,7 @@ void ThemidaCommon::CheckVirtualizedOEP(uintptr_t oep) {
     return;
   }
 
-  const auto readStub = [&](uintptr_t address, VmStubInfo* info) -> bool {
+  const auto read_stub = [&](uintptr_t address, VmStubInfo* info) -> bool {
     uint8_t code[16]{};
     if (!RPM(address, code, sizeof(code))) {
       return false;
@@ -94,7 +94,7 @@ void ThemidaCommon::CheckVirtualizedOEP(uintptr_t oep) {
   };
 
   VmStubInfo info;
-  if (!readStub(oep, &info)) {
+  if (!read_stub(oep, &info)) {
     return;
   }
 
@@ -106,16 +106,16 @@ void ThemidaCommon::CheckVirtualizedOEP(uintptr_t oep) {
     // into the VM. Follow one level when that target is not the VM itself.
     if (target < tm_sect_r_.address) {
       VmStubInfo next;
-      if (readStub(target, &next)) {
+      if (read_stub(target, &next)) {
         target = image_base_ + next.target_rva;
       }
     }
   }
 
   if (!pe_sections_.empty()) {
-    const uintptr_t textStart = image_base_ + pe_sections_[0].VirtualAddress;
-    const uintptr_t textEnd = textStart + pe_sections_[0].Misc.VirtualSize;
-    if (target >= textStart && target < textEnd) {
+    const uintptr_t text_start = image_base_ + pe_sections_[0].VirtualAddress;
+    const uintptr_t text_end = text_start + pe_sections_[0].Misc.VirtualSize;
+    if (target >= text_start && target < text_end) {
       // A jump inside the application's code section is not the VM.
       return;
     }
@@ -137,27 +137,27 @@ void ThemidaCommon::CheckVirtualizedOEP(uintptr_t oep) {
 
 uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
   ReportStatus("Locating the IAT");
-  uintptr_t textBase = 0;
-  uintptr_t codeSize = 0;
-  uintptr_t dataSize = 0;
-  int dataSectionIndex = 0;
-  uint8_t* codeDump = nullptr;
-  uint32_t numInstr = 0;
+  uintptr_t text_base = 0;
+  uintptr_t code_size = 0;
+  uintptr_t data_size = 0;
+  int data_section_index = 0;
+  uint8_t* code_dump = nullptr;
+  uint32_t num_instr = 0;
 
-  std::function<uintptr_t(uintptr_t, bool)> findCallOrJmpPtr =
-      [&](uintptr_t address, bool ignoreMethodBoundary = false) -> uintptr_t {
-    if (address < textBase || address >= textBase + codeSize) {
+  std::function<uintptr_t(uintptr_t, bool)> find_call_or_jmp_ptr =
+      [&](uintptr_t address, bool ignore_method_boundary = false) -> uintptr_t {
+    if (address < text_base || address >= text_base + code_size) {
       return 0;
     }
 
     DISASM dis{};
-    dis.EIP = reinterpret_cast<uintptr_t>(codeDump) + address - textBase;
+    dis.EIP = reinterpret_cast<uintptr_t>(code_dump) + address - text_base;
     dis.VirtualAddr = address;
 
-    while ((numInstr < 200) ||
-           (ignoreMethodBoundary && (dis.VirtualAddr < textBase + codeSize))) {
-      if (dis.VirtualAddr < textBase ||
-          dis.VirtualAddr >= textBase + codeSize) {
+    while ((num_instr < 200) || (ignore_method_boundary &&
+                                 (dis.VirtualAddr < text_base + code_size))) {
+      if (dis.VirtualAddr < text_base ||
+          dis.VirtualAddr >= text_base + code_size) {
         break;
       }
 
@@ -168,28 +168,28 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
         LogF(kLogInfo, "Found %08llX : %s",
              static_cast<unsigned long long>(dis.VirtualAddr),
              SafeString(dis.CompleteInstr, sizeof(dis.CompleteInstr)).c_str());
-        uintptr_t iatPointer =
+        uintptr_t iat_pointer =
             static_cast<uintptr_t>(dis.Operand1.Memory.Displacement);
 #if defined(_WIN64)
-        iatPointer += dis.VirtualAddr + 6;  // RIP-relative
+        iat_pointer += dis.VirtualAddr + 6;  // RIP-relative
 #endif
         // Ensure we didn't stumble upon a pointer into .text.
-        uintptr_t thePointer = 0;
-        if (!RPM(iatPointer, &thePointer, sizeof(thePointer)) ||
-            thePointer > textBase + codeSize) {
-          return iatPointer;
+        uintptr_t the_pointer = 0;
+        if (!RPM(iat_pointer, &the_pointer, sizeof(the_pointer)) ||
+            the_pointer > text_base + code_size) {
+          return iat_pointer;
         }
       }
 
       if (*reinterpret_cast<const uint8_t*>(dis.EIP) == 0xE8 &&
-          !ignoreMethodBoundary) {
-        if (dis.Instruction.AddrValue < textBase ||
-            dis.Instruction.AddrValue > textBase + codeSize) {
+          !ignore_method_boundary) {
+        if (dis.Instruction.AddrValue < text_base ||
+            dis.Instruction.AddrValue > text_base + code_size) {
           return 0;  // 32-bit: probably direct API call. Handled below.
         }
 
         const uintptr_t result =
-            findCallOrJmpPtr(dis.Instruction.AddrValue, false);
+            find_call_or_jmp_ptr(dis.Instruction.AddrValue, false);
         if (result != 0) {
           return result;
         }
@@ -197,11 +197,11 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
 
       if ((*reinterpret_cast<const uint8_t*>(dis.EIP) == 0xC3 ||
            *reinterpret_cast<const uint8_t*>(dis.EIP) == 0xC2) &&
-          !ignoreMethodBoundary) {
+          !ignore_method_boundary) {
         return 0;
       }
 
-      ++numInstr;
+      ++num_instr;
       if (len > 0) {
         dis.EIP += static_cast<uintptr_t>(len);
         dis.VirtualAddr += static_cast<uintptr_t>(len);
@@ -215,12 +215,12 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
     return 0;
   };
 
-  auto findGoAPICall = [&](uintptr_t address) -> uintptr_t {
+  auto find_go_api_call = [&](uintptr_t address) -> uintptr_t {
     DISASM dis{};
-    dis.EIP = reinterpret_cast<uintptr_t>(codeDump) + address - textBase;
+    dis.EIP = reinterpret_cast<uintptr_t>(code_dump) + address - text_base;
     dis.VirtualAddr = address;
 
-    while (dis.VirtualAddr < textBase + codeSize) {
+    while (dis.VirtualAddr < text_base + code_size) {
       const int len = DisasmCheck(dis);
 
       // mov rax, [addr]
@@ -233,19 +233,19 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
           (*reinterpret_cast<const uint32_t*>(dis.EIP + 6) & 0x00FFFFFF) ==
               0x00240489) {
 #endif
-        uintptr_t iatPointer =
+        uintptr_t iat_pointer =
             static_cast<uintptr_t>(dis.Operand2.Memory.Displacement);
 #if defined(_WIN64)
-        iatPointer += dis.VirtualAddr + 7;  // RIP-relative
+        iat_pointer += dis.VirtualAddr + 7;  // RIP-relative
 #endif
-        uintptr_t thePointer = 0;
-        if (RPM(iatPointer, &thePointer, sizeof(thePointer)) &&
-            dumper.IsAPIAddress(thePointer)) {
-          return iatPointer;
+        uintptr_t the_pointer = 0;
+        if (RPM(iat_pointer, &the_pointer, sizeof(the_pointer)) &&
+            dumper.IsAPIAddress(the_pointer)) {
+          return iat_pointer;
         }
       }
 
-      ++numInstr;
+      ++num_instr;
       if (len > 0) {
         dis.EIP += static_cast<uintptr_t>(len);
         dis.VirtualAddr += static_cast<uintptr_t>(len);
@@ -258,90 +258,94 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
     return 0;
   };  // NOLINT(readability/braces)
 
-  std::function<uintptr_t(uintptr_t, bool)> scanData =
-      [&](uintptr_t toFind, bool scanCode) -> uintptr_t {
-    uintptr_t startOffset = 0;
-    uintptr_t scanSize = 0;
-    if (!scanCode) {
-      startOffset = textBase + codeSize;
-      scanSize = dataSize;
+  std::function<uintptr_t(uintptr_t, bool)> scan_data =
+      [&](uintptr_t to_find, bool scan_code) -> uintptr_t {
+    uintptr_t start_offset = 0;
+    uintptr_t scan_size = 0;
+    if (!scan_code) {
+      start_offset = text_base + code_size;
+      scan_size = data_size;
     } else {
-      startOffset = textBase;
-      scanSize = codeSize;
+      start_offset = text_base;
+      scan_size = code_size;
     }
 
-    std::vector<uint8_t> dataSection(static_cast<size_t>(scanSize));
-    if (!RPM(startOffset, dataSection.data(), dataSection.size())) {
+    std::vector<uint8_t> data_section(static_cast<size_t>(scan_size));
+    if (!RPM(start_offset, data_section.data(), data_section.size())) {
       throw std::runtime_error("DetermineIATAddress.ScanData: RPM failed");
     }
 
     // We assume the table is machine-word aligned.
-    const size_t count = dataSection.size() / sizeof(uintptr_t);
-    const auto* walker = reinterpret_cast<const uintptr_t*>(dataSection.data());
+    const size_t count = data_section.size() / sizeof(uintptr_t);
+    const auto* walker =
+        reinterpret_cast<const uintptr_t*>(data_section.data());
     for (size_t index = 0; index < count; ++index) {
-      if (walker[index] == toFind) {
-        return startOffset + index * sizeof(uintptr_t);
+      if (walker[index] == to_find) {
+        return start_offset + index * sizeof(uintptr_t);
       }
     }
 
-    if (scanCode) {
+    if (scan_code) {
       throw std::runtime_error("Unable to find API in section");
     }
     // Retry with first part of section in case of extreme merges (Themida V1).
-    return scanData(toFind, true);
+    return scan_data(to_find, true);
   };
 
   // For MSVC, the IAT often resides at image_base + baseOfData. Other compilers
   // such as Delphi use a dedicated .idata section, but the IAT doesn't start
   // directly at the beginning, so some guesswork is needed.
-  dataSectionIndex = 0;
+  data_section_index = 0;
   for (size_t i = 0; i < pe_sections_.size(); ++i) {
     if (base_of_data_ <
         pe_sections_[i].VirtualAddress + pe_sections_[i].Misc.VirtualSize) {
-      dataSectionIndex = static_cast<int>(i);
+      data_section_index = static_cast<int>(i);
       break;
     }
   }
 
-  textBase = image_base_ + pe_sections_[0].VirtualAddress;
-  codeSize = base_of_data_ - pe_sections_[0].VirtualAddress;
-  dataSize =
-      pe_sections_[static_cast<size_t>(dataSectionIndex)].Misc.VirtualSize -
+  text_base = image_base_ + pe_sections_[0].VirtualAddress;
+  code_size = base_of_data_ - pe_sections_[0].VirtualAddress;
+  data_size =
+      pe_sections_[static_cast<size_t>(data_section_index)].Misc.VirtualSize -
       (base_of_data_ -
-       pe_sections_[static_cast<size_t>(dataSectionIndex)].VirtualAddress);
+       pe_sections_[static_cast<size_t>(data_section_index)].VirtualAddress);
   LogF(kLogInfo, "Text base: 0x%.8llX, code size: 0x%llX, data size: 0x%llX",
-       static_cast<unsigned long long>(textBase),
-       static_cast<unsigned long long>(codeSize),
-       static_cast<unsigned long long>(dataSize));
-  numInstr = 0;
+       static_cast<unsigned long long>(text_base),
+       static_cast<unsigned long long>(code_size),
+       static_cast<unsigned long long>(data_size));
+  num_instr = 0;
 
   // 16 bytes of zero padding let the decoder safely read a full instruction
   // at the end of the code section (matching the original's behaviour).
-  std::vector<uint8_t> codeDumpStorage(static_cast<size_t>(codeSize) + 16, 0);
-  codeDump = codeDumpStorage.data();
+  std::vector<uint8_t> code_dump_storage(static_cast<size_t>(code_size) + 16,
+                                         0);
+  code_dump = code_dump_storage.data();
   {
-    if (!RPM(textBase, codeDump, codeSize)) {
+    if (!RPM(text_base, code_dump, code_size)) {
       throw std::runtime_error("DetermineIATAddress: RPM failed");
     }
 
-    uintptr_t iatRef = 0;
-    if (*reinterpret_cast<const uint32_t*>(codeDump) == 0x6F4720FF) {
-      iatRef = findGoAPICall(
-          textBase +
-          FindGoBuildIdEnd(codeDump, static_cast<uint32_t>(codeSize)));
+    uintptr_t iat_ref = 0;
+    if (*reinterpret_cast<const uint32_t*>(code_dump) == 0x6F4720FF) {
+      iat_ref = find_go_api_call(
+          text_base +
+          FindGoBuildIdEnd(code_dump, static_cast<uint32_t>(code_size)));
     } else if (!is_vm_oep_) {
-      iatRef = findCallOrJmpPtr(oep, false);
+      iat_ref = find_call_or_jmp_ptr(oep, false);
     } else if (*reinterpret_cast<const uint32_t*>(
-                   codeDump + (sizeof(void*) == 4 ? 6 : 10)) == 0x6C6F6F42 ||
-               *reinterpret_cast<const uint32_t*>(codeDump + 6) == 0x65747942) {
-      iatRef = findCallOrJmpPtr(
-          textBase + FindDelphiCall(codeDump, static_cast<uint32_t>(codeSize)),
+                   code_dump + (sizeof(void*) == 4 ? 6 : 10)) == 0x6C6F6F42 ||
+               *reinterpret_cast<const uint32_t*>(code_dump + 6) ==
+                   0x65747942) {
+      iat_ref = find_call_or_jmp_ptr(
+          text_base +
+              FindDelphiCall(code_dump, static_cast<uint32_t>(code_size)),
           true);
     } else {
-      iatRef = findCallOrJmpPtr(textBase, true);
+      iat_ref = find_call_or_jmp_ptr(text_base, true);
     }
 
-    if (iatRef == 0) {
+    if (iat_ref == 0) {
       Log(kLogInfo, "No IAT reference found via reference search");
       if (!guard_addrs_.empty()) {
         uint8_t site[6]{};
@@ -360,38 +364,38 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
         LogF(kLogInfo, "First guard addr %.8llX yielded API %.8llX",
              static_cast<unsigned long long>(guard_addrs_[0]),
              static_cast<unsigned long long>(target));
-        iatRef = scanData(target, false);
+        iat_ref = scan_data(target, false);
       } else {
         throw std::runtime_error("Found no way to obtain IAT reference");
       }
     }
     LogF(kLogGood, "First IAT ref: %08llX",
-         static_cast<unsigned long long>(iatRef));
+         static_cast<unsigned long long>(iat_ref));
 
     // The IATRef we obtained points somewhere into the IAT area. Now we need
     // to figure out the start of the table.
     uintptr_t result = 0;
-    uintptr_t seeker = iatRef;
+    uintptr_t seeker = iat_ref;
     // Read data such that the last word is the pointer at IATRef.
-    std::vector<uintptr_t> iatData(kMaxIatSize / sizeof(uintptr_t));
-    const uintptr_t readSize = iatData.size() * sizeof(uintptr_t);
-    if (iatRef < readSize - sizeof(uintptr_t)) {
+    std::vector<uintptr_t> iat_data(kMaxIatSize / sizeof(uintptr_t));
+    const uintptr_t read_size = iat_data.size() * sizeof(uintptr_t);
+    if (iat_ref < read_size - sizeof(uintptr_t)) {
       throw std::runtime_error("IAT ref is too low");
     }
-    RPM(iatRef - (readSize - sizeof(uintptr_t)), iatData.data(), readSize);
+    RPM(iat_ref - (read_size - sizeof(uintptr_t)), iat_data.data(), read_size);
     int consecutive0 = 0;
-    int index = static_cast<int>(iatData.size()) - 1;
+    int index = static_cast<int>(iat_data.size()) - 1;
     while (index >= 0) {
-      if (iatData[static_cast<size_t>(index)] == 0) {
+      if (iat_data[static_cast<size_t>(index)] == 0) {
         ++consecutive0;
         if (consecutive0 > 64) {
           // Yes, there are legit executables that have almost 0x100 bytes
           // between their thunks.
           break;
         }
-      } else if (dumper.IsAPIAddress(iatData[static_cast<size_t>(index)]) ||
+      } else if (dumper.IsAPIAddress(iat_data[static_cast<size_t>(index)]) ||
                  (themida_v3_ &&
-                  tm_sect_r_.Contains(iatData[static_cast<size_t>(index)]))) {
+                  tm_sect_r_.Contains(iat_data[static_cast<size_t>(index)]))) {
         result = seeker;
         consecutive0 = 0;
       } else {
@@ -399,7 +403,7 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
              "Ending IAT start search at %llX because pointer is %llX",
              static_cast<unsigned long long>(seeker),
              static_cast<unsigned long long>(
-                 iatData[static_cast<size_t>(index)]));
+                 iat_data[static_cast<size_t>(index)]));
         break;
       }
 
@@ -418,18 +422,18 @@ uintptr_t ThemidaCommon::DetermineIATAddress(uintptr_t oep, Dumper& dumper) {
 
 void ThemidaCommon::TraceImports(uintptr_t iat, Dumper& dumper) {
   ReportStatus("Tracing imports");
-  std::array<uintptr_t, kMaxIatSize / sizeof(uintptr_t)> iatData{};
-  RPM(iat, iatData.data(), sizeof(iatData));
+  std::array<uintptr_t, kMaxIatSize / sizeof(uintptr_t)> iat_data{};
+  RPM(iat, iat_data.data(), sizeof(iat_data));
 
-  bool didSetExitProcess = false;
-  uint32_t trashCounter = 0;
-  for (size_t i = 0; i < iatData.size(); ++i) {
-    if (tm_sect_r_.Contains(iatData[i])) {
+  bool did_set_exit_process = false;
+  uint32_t trash_counter = 0;
+  for (size_t i = 0; i < iat_data.size(); ++i) {
+    if (tm_sect_r_.Contains(iat_data[i])) {
       LogF(kLogInfo, "Trace: %.8llX [%.8llX]",
-           static_cast<unsigned long long>(iatData[i]),
+           static_cast<unsigned long long>(iat_data[i]),
            static_cast<unsigned long long>(iat + i * sizeof(uintptr_t)));
 
-      trashCounter = 0;
+      trash_counter = 0;
 
       CONTEXT context{};
       context.ContextFlags = CONTEXT_CONTROL;
@@ -445,19 +449,19 @@ void ThemidaCommon::TraceImports(uintptr_t iat, Dumper& dumper) {
       {
         Tracer tracer(process_.dwProcessId, current_thread_id_,
                       GetThread(current_thread_id_),
-                      [this](Tracer& tracerRef, CONTEXT& contextRef) {
-                        return TraceIsAtAPI(tracerRef, contextRef);
+                      [this](Tracer& tracer_ref, CONTEXT& context_ref) {
+                        return TraceIsAtAPI(tracer_ref, context_ref);
                       });
         // Normally a couple hundred suffice, but newer Themida v3 versions do
         // some export directory walking...
-        tracer.Trace(iatData[i], 500000);
+        tracer.Trace(iat_data[i], 500000);
 
         if (trace_in_vm_) {
-          if (!didSetExitProcess) {
-            didSetExitProcess = true;
+          if (!did_set_exit_process) {
+            did_set_exit_process = true;
             // ExitProcess seems to be a special case that resolves to a VM
             // func - we assume there is only one such case.
-            iatData[i] = reinterpret_cast<uintptr_t>(GetProcAddress(
+            iat_data[i] = reinterpret_cast<uintptr_t>(GetProcAddress(
                 GetModuleHandleW(L"kernel32.dll"), "ExitProcess"));
             Log(kLogInfo, "Setting API to ExitProcess");
           } else {
@@ -472,26 +476,26 @@ void ThemidaCommon::TraceImports(uintptr_t iat, Dumper& dumper) {
             Log(kLogInfo, "Discarding result & aborting IAT tracing");
             break;
           }
-          iatData[i] = traced_api_;
+          iat_data[i] = traced_api_;
         } else {
           Log(kLogFatal, "Tracing failed!");
         }
       }
-    } else if (iatData[i] == 0 || !dumper.IsAPIAddress(iatData[i])) {
-      ++trashCounter;
-      if (trashCounter > 64) {
+    } else if (iat_data[i] == 0 || !dumper.IsAPIAddress(iat_data[i])) {
+      ++trash_counter;
+      if (trash_counter > 64) {
         break;
       }
     } else {
-      trashCounter = 0;
+      trash_counter = 0;
     }
   }
 
-  DWORD oldProtect = 0;
+  DWORD old_protect = 0;
   VirtualProtectEx(process_.hProcess, reinterpret_cast<void*>(iat),
-                   sizeof(iatData), PAGE_READWRITE, &oldProtect);
+                   sizeof(iat_data), PAGE_READWRITE, &old_protect);
   if (!WriteProcessMemory(process_.hProcess, reinterpret_cast<void*>(iat),
-                          iatData.data(), sizeof(iatData), nullptr)) {
+                          iat_data.data(), sizeof(iat_data), nullptr)) {
     throw std::runtime_error(
         Format("WriteProcessMemory failed (error %lu)", GetLastError()));
   }

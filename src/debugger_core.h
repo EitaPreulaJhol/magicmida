@@ -42,7 +42,7 @@ enum class SoftBPAction {
 class DebuggerCore {
  public:
   DebuggerCore(const std::wstring& executable, const std::wstring& parameters);
-  explicit DebuggerCore(DWORD attachPid);
+  explicit DebuggerCore(DWORD attach_pid);
   virtual ~DebuggerCore() = default;
 
   DebuggerCore(const DebuggerCore&) = delete;
@@ -63,13 +63,13 @@ class DebuggerCore {
  protected:
   void MarkSuccess() { succeeded_ = true; }
 
-  HANDLE GetThread(DWORD threadId);
+  HANDLE GetThread(DWORD thread_id);
 
   void FetchMemoryRegions();
-  bool RPM(uintptr_t address, void* buf, size_t bufSize);
+  bool RPM(uintptr_t address, void* buf, size_t buf_size);
 
   void SetBreakpoint(uintptr_t address, HWBPType type = HWBPType::kExecute,
-                     bool refreshContexts = true);
+                     bool refresh_contexts = true);
   bool DisableBreakpoint(uintptr_t address);
   void EnableBreakpoints();
   void ResetBreakpoint(uintptr_t address);
@@ -81,17 +81,17 @@ class DebuggerCore {
   void SoftBPClear();
 
   // Hooks (original virtual methods).
-  virtual void OnDebugStart(HANDLE& hPE, HANDLE hThread) = 0;
-  virtual DWORD OnAccessViolation(HANDLE hThread,
-                                  const EXCEPTION_RECORD& exceptionRecord);
-  virtual void OnDLLLoad(const std::wstring& fileName, void* baseAddress);
-  virtual void OnHardwareBreakpoint(HANDLE hThread, uintptr_t bpAddress,
+  virtual void OnDebugStart(HANDLE& file_handle, HANDLE thread_handle) = 0;
+  virtual DWORD OnAccessViolation(HANDLE thread_handle,
+                                  const EXCEPTION_RECORD& exception_record);
+  virtual void OnDLLLoad(const std::wstring& file_name, void* base_address);
+  virtual void OnHardwareBreakpoint(HANDLE thread_handle, uintptr_t bp_address,
                                     CONTEXT& context) = 0;
-  virtual SoftBPAction OnSoftwareBreakpoint(HANDLE hThread,
-                                            uintptr_t bpAddress) = 0;
-  virtual void OnUnsolicitedSoftwareBreakpoint(HANDLE hThread,
-                                               uintptr_t bpAddress);
-  virtual DWORD OnSinglestep(uintptr_t bpAddress);
+  virtual SoftBPAction OnSoftwareBreakpoint(HANDLE thread_handle,
+                                            uintptr_t bp_address) = 0;
+  virtual void OnUnsolicitedSoftwareBreakpoint(HANDLE thread_handle,
+                                               uintptr_t bp_address);
+  virtual DWORD OnSinglestep(uintptr_t bp_address);
 
   // State shared with the Themida-specific implementations.
   std::wstring executable_;
@@ -108,16 +108,16 @@ class DebuggerCore {
   void PEInspect();
   void MakeDLLExecutable();
 
-  DWORD OnCreateThreadDebugEvent(DEBUG_EVENT& debugEvent);
-  DWORD OnCreateProcessDebugEvent(DEBUG_EVENT& debugEvent);
-  DWORD OnExitThreadDebugEvent(DEBUG_EVENT& debugEvent);
-  DWORD OnLoadDllDebugEvent(DEBUG_EVENT& debugEvent);
-  DWORD OnExitProcessDebugEvent(DEBUG_EVENT& debugEvent);
-  DWORD OnUnloadDllDebugEvent(DEBUG_EVENT& debugEvent);
-  DWORD OnOutputDebugStringEvent(DEBUG_EVENT& debugEvent);
-  DWORD OnRipEvent(DEBUG_EVENT& debugEvent);
-  DWORD OnHardwareBreakpointEvent(DEBUG_EVENT& debugEvent);
-  DWORD OnSoftwareBreakpointEvent(DEBUG_EVENT& debugEvent);
+  DWORD OnCreateThreadDebugEvent(DEBUG_EVENT& debug_event);
+  DWORD OnCreateProcessDebugEvent(DEBUG_EVENT& debug_event);
+  DWORD OnExitThreadDebugEvent(DEBUG_EVENT& debug_event);
+  DWORD OnLoadDllDebugEvent(DEBUG_EVENT& debug_event);
+  DWORD OnExitProcessDebugEvent(DEBUG_EVENT& debug_event);
+  DWORD OnUnloadDllDebugEvent(DEBUG_EVENT& debug_event);
+  DWORD OnOutputDebugStringEvent(DEBUG_EVENT& debug_event);
+  DWORD OnRipEvent(DEBUG_EVENT& debug_event);
+  DWORD OnHardwareBreakpointEvent(DEBUG_EVENT& debug_event);
+  DWORD OnSoftwareBreakpointEvent(DEBUG_EVENT& debug_event);
 
   bool WriteByte(uintptr_t address, uint8_t value);
 

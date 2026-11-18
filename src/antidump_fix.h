@@ -19,7 +19,7 @@ class AntiDumpFixer {
   void RedirectOEP(uintptr_t oep, uintptr_t iat);
 
  private:
-  bool RPM(uintptr_t address, void* buf, size_t bufSize);
+  bool RPM(uintptr_t address, void* buf, size_t buf_size);
 
   HANDLE process_;
   uintptr_t image_base_;

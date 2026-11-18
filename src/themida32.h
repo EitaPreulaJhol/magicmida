@@ -15,22 +15,22 @@ namespace magicmida {
 class ThemidaDebugger : public ThemidaCommon {
  public:
   ThemidaDebugger(const std::wstring& executable,
-                  const std::wstring& parameters, bool createData,
+                  const std::wstring& parameters, bool create_data,
                   bool use_scylla_hide = true, bool fix_relocations = false);
   ~ThemidaDebugger() override = default;
 
  protected:
   bool TraceIsAtAPI(Tracer& tracer, CONTEXT& context) override;
 
-  void OnDebugStart(HANDLE& hPE, HANDLE hThread) override;
-  DWORD OnAccessViolation(HANDLE hThread,
-                          const EXCEPTION_RECORD& exceptionRecord) override;
-  void OnDLLLoad(const std::wstring& fileName, void* baseAddress) override;
-  DWORD OnSinglestep(uintptr_t bpAddress) override;
-  void OnHardwareBreakpoint(HANDLE hThread, uintptr_t bpAddress,
+  void OnDebugStart(HANDLE& file_handle, HANDLE thread_handle) override;
+  DWORD OnAccessViolation(HANDLE thread_handle,
+                          const EXCEPTION_RECORD& exception_record) override;
+  void OnDLLLoad(const std::wstring& file_name, void* base_address) override;
+  DWORD OnSinglestep(uintptr_t bp_address) override;
+  void OnHardwareBreakpoint(HANDLE thread_handle, uintptr_t bp_address,
                             CONTEXT& context) override;
-  SoftBPAction OnSoftwareBreakpoint(HANDLE hThread,
-                                    uintptr_t bpAddress) override;
+  SoftBPAction OnSoftwareBreakpoint(HANDLE thread_handle,
+                                    uintptr_t bp_address) override;
 
  private:
   struct EFLRecord {
@@ -40,23 +40,23 @@ class ThemidaDebugger : public ThemidaCommon {
 
   bool TMFinderCheck(CONTEXT* context);
   void SelectThemidaSection(uintptr_t eip);
-  void TMInit(HANDLE& hPE);
+  void TMInit(HANDLE& file_handle);
   void TMIATFix(uintptr_t eip);
   void TMIATFix2();
   void TMIATFix3(uintptr_t eip);
   void TMIATFix4();
   void TMIATFix5(uintptr_t eax);
-  void TMIATFixThemidaV1(uintptr_t baseCompare1);
+  void TMIATFixThemidaV1(uintptr_t base_compare1);
   bool GetIATBPAddressNew(uintptr_t& result);
   bool InstallEFLPatch(uintptr_t eip, CONTEXT& context, EFLRecord& record);
 
   void InstallCodeSectionGuard(uint32_t protection);
   bool IsGuardedAddress(uintptr_t address);
-  DWORD ProcessGuardedAccess(HANDLE hThread,
-                             const EXCEPTION_RECORD& exceptionRecord);
+  DWORD ProcessGuardedAccess(HANDLE thread_handle,
+                             const EXCEPTION_RECORD& exception_record);
 
-  void RestoreStolenOEPForMSVC6(HANDLE hThread, uintptr_t& oep);
-  void RestoreStolenOEPForMSVC9DLL(HANDLE hThread, uintptr_t& oep);
+  void RestoreStolenOEPForMSVC6(HANDLE thread_handle, uintptr_t& oep);
+  void RestoreStolenOEPForMSVC9DLL(HANDLE thread_handle, uintptr_t& oep);
   uintptr_t TryFindCorrectOEP(uintptr_t oep);
   bool IsTMExceptionHandler(uintptr_t address);
   void FixupAPICallSites(uintptr_t iat);
