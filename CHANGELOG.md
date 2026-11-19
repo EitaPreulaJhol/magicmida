@@ -2,6 +2,19 @@
 
 All notable changes to Magicmida (C++ port) are documented here.
 
+## [1.0.1] - 2026-11-18
+
+Maintenance release. No changes to unpacking behavior.
+
+- First-party sources now follow the Google C++ Style Guide: snake_case
+  locals and parameters, capitalized constants and data members, ordered
+  includes, and SPDX license identifiers in every file.
+- Global state replaced with accessor functions.
+- Added `docs/style.md` with a documented waiver for the exception-based
+  error handling inherited from the Delphi port, plus
+  `tools/check_exceptions.py` to keep the baseline from growing.
+- CI now enforces formatting with `clang-format` and `cpplint`.
+
 ## [1.0.0] - 2026-11-04
 
 Initial public release.
